@@ -290,6 +290,7 @@ textarea { width: 100%; box-sizing: border-box; min-height: 96px; border: 1px so
   position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60;
   background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100% - 32px);
   box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+  pointer-events: none; /* 通知が下のボタンへのタップを邪魔しないように */
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -19,7 +19,7 @@
 
   // 編集状態（履歴に含めない表示上の状態）
   const ui = {
-    tab: 'contour', finger: 'index', tool: 'edit', artTool: 'art', place: 'point', selPt: -1, selDeco: -1,
+    tab: 'contour', finger: 'index', tool: 'pan', artTool: 'pan', place: 'point', selPt: -1, selDeco: -1,
     compare: false, guides: true, pendingCut: null, allTargets: {},
     views: { photo: { zoom: 1, cx: 0, cy: 0 }, ref: { zoom: 1, cx: 0, cy: 0 } },
     saveStatus: '', lastSaved: null, idbOK: true,
@@ -337,7 +337,7 @@
       const t = target();
       const sh = t && t.shape;
       const who = refMode() ? '参考画像の爪' : fname(ui.finger) + 'の爪';
-      if (needsZoomFirst()) msg = '① ' + who + 'をタップして拡大（2本指でも可）→ ② ふちに点を置く';
+      if (needsZoomFirst() || (ui.tool === 'pan' && sh && !sh.points.length)) msg = '① ' + who + 'をタップして拡大（2本指でも可）→ ② ふちに点を置く';
       else if (ui.tool === 'pan') msg = '1本指で写真を動かせます（点を置くには「点を編集」）';
       else if (ui.place === 'base') msg = '根元（甘皮側）の位置をタップしてください';
       else if (ui.place === 'tip') msg = '先端の位置をタップしてください';
@@ -543,6 +543,11 @@
       }
       showLoupe(p, np);
       markDirty();
+    } else if (gesture.type === 'place' && U.dist(p, gesture.s) > 40) {
+      const v = ui.views[viewKey()];
+      Object.assign(gesture, { type: 'pan', s: p, cx0: v.cx, cy0: v.cy, moved: true });
+      hideLoupe();
+      requestDraw();
     } else if (gesture.type === 'place') {
       gesture.cur = p;
       showLoupe(p, toImage(p, X));
@@ -581,8 +586,9 @@
       requestDraw();
     } else if (g.type === 'pan' || g.type === 'art') {
       if (g.type === 'art' && g.moved) { commit(); renderPanelSoft(); markDirty(); }
-      if (!g.moved && g.type === 'pan' && needsZoomFirst()) {
-        zoomAtImage(toImage(g.s, X));
+      if (!g.moved && g.type === 'pan' && editingContour() && ui.place === 'point' && target() && !target().shape.points.length) {
+        const st = stageSize();
+        if (Math.min(st.w, st.h) / X.scale > 380) zoomAtImage(toImage(g.s, X));
         switchToEdit();
       } else if (!g.moved && performance.now() - g.t < 500 && !refMode()) tapSelect(toImage(g.s, X));
     }
@@ -781,9 +787,10 @@
     ui.finger = id; ui.selPt = -1; ui.selDeco = -1; ui.place = 'point';
     // 輪郭づくりでは：輪郭がある指はその爪へ、まだの指は全体表示に戻して「タップで拡大」から始める
     if (ui.tab === 'contour' && state.photo) {
-      if (state.nails[id].shape.points.length >= 3) zoomToNail();
-      else { fitView('photo'); ui.tool = 'pan'; }
+      if (state.nails[id].shape.points.length >= 3) zoomToNail(); else fitView('photo');
     }
+    // 指を替えたら、まず「写真を動かす」から（誤って点や柄が動かないように）
+    ui.tool = 'pan'; ui.artTool = 'pan';
     renderFingers(); renderPanel(); requestDraw();
   }
 
@@ -804,6 +811,7 @@
   }
   function setTab(t) {
     ui.tab = t; ui.selPt = -1; ui.place = 'point'; ui.compare = false;
+    ui.tool = 'pan'; ui.artTool = 'pan';
     syncCompare();
     renderAll();
   }
@@ -950,7 +958,7 @@
     kids.push(note('写真の上を1本指でなぞると柄が動き、2本指で大きさと向きを変えられます。細かい調整は下のスライダーで。'));
     const src = d.art && d.art.kind === 'cutout' ? env().cutoutImg(d.art.cutoutId) : d.art && d.art.kind === 'image' ? env().assetImg(d.art.assetId) : null;
     const f = shape && U.nailFrame(shape);
-    if (src && f && t.fit !== 'stretch') {
+    if (src && f && t.fit === 'clip') {
       // 参考の爪と自分の爪の大きさが違うときの「ひと押し合わせ」
       const k0 = R.artBaseK(f.W, f.H, src.w, src.h);
       const fitTo = (k, sy) => {
@@ -968,7 +976,7 @@
     }
     if (showFit) {
       kids.push(h('div', { class: 'chips', role: 'group', 'aria-label': '合わせ方' }, [
-        ['clip', 'A 比率を保って爪で切る'], ['stretch', 'B 爪の長さ・幅に合わせる'],
+        ['shape', '形に沿わせる（おすすめ）'], ['clip', 'A 比率を保って爪で切る'], ['stretch', 'B 爪の長さ・幅に合わせる'],
       ].map(([k, l]) => h('button', {
         type: 'button', class: 'chip', 'aria-pressed': t.fit === k ? 'true' : 'false',
         onclick: () => { t.fit = k; commit(); markDirty(); renderPanel(); },
@@ -1039,6 +1047,14 @@
       if (cut) panel.appendChild(cutoutCompare(n, cut));
     }
     if (n.design && n.design.art && n.design.art.kind === 'cutout') {
+      const cut = state.cutouts.find((c) => c.id === n.design.art.cutoutId);
+      const rx = cut && refExt(n, cut);
+      if (rx && rx.on) {
+        panel.appendChild(group('長さ', [
+          btn('参考の爪と同じ長さ・形にする（つけ爪）', () => { n.shape.ext = rx; commit(); markDirty(); renderPanel(); toast('長さを +' + Math.round(rx.length * 100) + '%、' + U.EXT_SHAPES[rx.shape].name + 'にしました'); }),
+        ]));
+      }
+      panel.appendChild(extGroup(n));
       panel.appendChild(group('位置・大きさの調整', tfControls(n.design, true, n.shape)));
       panel.appendChild(finishGroup(n.design, '立体感・光沢（のっぺり見えるとき）', true));
       panel.appendChild(copyTargets((id) => {
@@ -1055,36 +1071,57 @@
   const thumbScale = () => Math.min(3, Math.max(2, window.devicePixelRatio || 1));
   const TW = () => Math.round(160 * thumbScale()), TH = () => Math.round(200 * thumbScale());
   const thumbImg = (canvas, alt) => h('img', { src: canvas.toDataURL('image/jpeg', 0.9), alt });
+  // 参考の爪と同じ縦横比になる長さだしを計算する
+  function refExt(n, cut) {
+    const src = env().cutoutImg(cut.id);
+    if (!src) return null;
+    const info = R.analyzeCutout(cut.id + '|' + src.w + 'x' + src.h, src.img, src.w, src.h);
+    const f0 = U.nailFrame(Object.assign({}, n.shape, { ext: null }));
+    if (!f0) return null;
+    const len = U.clamp((f0.W * info.aspect) / f0.H - 1, 0, 1.5);
+    return { on: len > 0.04, length: Math.round(len * 100) / 100, shape: info.shape };
+  }
+
   function cutoutCompare(n, cut) {
     const e = env();
     const f = U.nailFrame(n.shape);
-    const mk = (fit) => {
+    const mk = () => {
       const d = n.design ? U.clone(n.design) : M.defaultDesign();
       d.art = { kind: 'cutout', cutoutId: cut.id };
-      d.tf = Object.assign(M.defaultDesign().tf, { fit });
-      if (!n.design || !(n.design.art && n.design.art.kind === 'cutout')) { d.color = null; d.shadeAmt = 0.4; d.gloss = 0; d.curve = 0.45; d.french.on = false; d.glitter.on = false; }
+      d.tf = Object.assign(M.defaultDesign().tf, { fit: 'shape' });
+      if (!n.design || !(n.design.art && n.design.art.kind === 'cutout')) { d.color = null; d.opacity = 1; d.shadeAmt = 0.4; d.gloss = 0; d.curve = 0.45; d.french.on = false; d.glitter.on = false; }
       d.presetId = null;
       return d;
     };
+    const ext = refExt(n, cut);
+    const options = [
+      { key: 'shape', cap: 'おすすめ：形に沿わせる', shape: Object.assign(U.clone(n.shape), { ext: n.shape.ext && n.shape.ext.on ? n.shape.ext : null }) },
+    ];
+    if (ext && ext.on) options.push({ key: 'ext', cap: '長さも参考に合わせる', shape: Object.assign(U.clone(n.shape), { ext }) });
     const cells = [];
-    cells.push(h('div', { class: 'thumb' }, [thumbImg(R.closeup(photoCanvas, f, TW(), TH(), null), '元の爪'), h('span', { class: 'cap', text: '元の爪' })]));
-    ['clip', 'stretch'].forEach((fit) => {
-      const d = mk(fit);
-      const layer = R.nailLayer(n.shape, d, e, ui.finger);
-      const active = n.design && n.design.art && n.design.art.cutoutId === cut.id && n.design.tf.fit === fit;
+    const f0 = U.nailFrame(Object.assign({}, n.shape, { ext: null }));
+    cells.push(h('div', { class: 'thumb' }, [thumbImg(R.closeup(photoCanvas, f0, TW(), TH(), null), '元の爪'), h('span', { class: 'cap', text: '元の爪' })]));
+    options.forEach((o) => {
+      const d = mk();
+      const fo = U.nailFrame(o.shape);
+      const layer = R.nailLayer(o.shape, d, e, ui.finger);
+      const active = n.design && n.design.art && n.design.art.cutoutId === cut.id && n.design.tf.fit === 'shape' &&
+        JSON.stringify(n.shape.ext && n.shape.ext.on ? n.shape.ext : null) === JSON.stringify(o.shape.ext || null);
       cells.push(h('button', {
         type: 'button', class: 'thumb', 'aria-pressed': active ? 'true' : 'false',
         onclick: () => {
           n.design = d;
-          ui.artTool = 'art';
+          if (o.key === 'ext') n.shape.ext = U.clone(o.shape.ext);
           commit(); markDirty(); renderPanel();
           zoomToNailIfSmall();
-          toast(fname(ui.finger) + 'に適用しました（' + (fit === 'clip' ? 'A' : 'B') + '）');
+          toast(fname(ui.finger) + 'に適用しました（' + o.cap.replace('おすすめ：', '') + '）');
         },
-      }, [thumbImg(R.closeup(photoCanvas, f, TW(), TH(), layer), fit === 'clip' ? 'A' : 'B'), h('span', { class: 'cap', text: fit === 'clip' ? 'A 比率を保つ' : 'B 爪に合わせる' })]));
+      }, [thumbImg(R.closeup(photoCanvas, f0.H > fo.H ? f0 : fo, TW(), TH(), layer), o.cap), h('span', { class: 'cap', text: o.cap })]));
     });
     return group('適用前に見比べる', [h('div', { class: 'compare3' }, cells),
-      note('A は柄の縦横比を保ち、はみ出した部分を爪の輪郭で切ります。B は柄全体を爪の長さ・幅に合わせて変形します。タップで適用します。')]);
+      note('「形に沿わせる」は、参考の爪の輪郭を自分の爪の輪郭に合わせて、根元から先端まで隙間なく貼ります。' +
+        (ext && ext.on ? '「長さも参考に合わせる」は、参考の爪と同じ縦横比になるよう、つけ爪で長さを出します（先端の形は' + U.EXT_SHAPES[ext.shape].name + 'と推定）。' : '') +
+        'タップで適用します。ほかの貼り方（A・B）は下の調整で選べます。')]);
   }
 
   function panelRefEdit() {
@@ -1138,10 +1175,13 @@
     const w = Math.round(f.W * k), hh = Math.round(f.H * k);
     const c = U.makeCanvas(w, hh);
     const ctx = c.getContext('2d');
-    const T = U.imageToUpright(f, k, w / 2, hh / 2);
-    ctx.setTransform(T[0], T[1], T[2], T[3], T[4], T[5]);
+    // 輪郭のきわ（肌・甘皮・影が混ざりやすい部分）を使わないよう、中身を少しだけ拡大して切り抜く
+    const T0 = U.imageToUpright(f, k * 1.05, w / 2, hh / 2);
+    ctx.setTransform(T0[0], T0[1], T0[2], T0[3], T0[4], T0[5]);
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(refCanvas, 0, 0);
+    const T = U.imageToUpright(f, k, w / 2, hh / 2);
+    ctx.setTransform(T[0], T[1], T[2], T[3], T[4], T[5]);
     ctx.globalCompositeOperation = 'destination-in';
     U.pathFrom(ctx, f.contour);
     ctx.fill();
@@ -1171,7 +1211,7 @@
     toast('図解の参考画像に、例として輪郭を入れてあります。点は動かせます');
   }
   function startRefEdit() {
-    ui.tab = 'photo'; ui.selPt = -1; ui.place = 'point'; ui.tool = 'edit';
+    ui.tab = 'photo'; ui.selPt = -1; ui.place = 'point'; ui.tool = 'pan';
     buildRefCanvas();
     fitView('ref');
     commit();
@@ -1478,7 +1518,7 @@
       state.photo = { assetId: r.id, w: r.w, h: r.h, demo: false };
       buildPhotoCanvas();
       fitView('photo');
-      ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null;
+      ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null; ui.tool = 'pan'; ui.artTool = 'pan';
       commit();
       hideStart();
       renderAll();
@@ -1498,7 +1538,7 @@
     state.nails.middle.design = M.applyPreset(null, M.PRESETS.find((p) => p.id === 'flowers'));
     buildPhotoCanvas();
     fitView('photo');
-    ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null;
+    ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null; ui.tool = 'pan'; ui.artTool = 'pan';
     commit();
     hideStart();
     renderAll();

@@ -83,6 +83,87 @@
     return L;
   }
 
+  /* ---- 「形に沿わせる」貼り方 ----
+     参考の爪と自分の爪を、根元から先端まで同じ割合の位置どうしで対応させ、
+     各段の左右の端を合わせて貼る。隙間も切り落としも出ず、新しい模様は作らない。 */
+  const spanCache = new Map();
+  // 透過画像の各行で、不透明な部分の左端・右端を調べる
+  function alphaSpans(key, img, w, h) {
+    const hit = spanCache.get(key);
+    if (hit) return hit;
+    const c = U.makeCanvas(w, h);
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data;
+    const L = new Float32Array(h).fill(NaN), Rr = new Float32Array(h).fill(NaN);
+    let maxW = 0;
+    for (let y = 0; y < h; y++) {
+      let l = -1, r = -1;
+      for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 128) { if (l < 0) l = x; r = x + 1; }
+      if (l >= 0) { L[y] = l; Rr[y] = r; maxW = Math.max(maxW, r - l); }
+    }
+    const res = { L, R: Rr, maxW, h, w };
+    cacheSet(spanCache, key, res, 30);
+    return res;
+  }
+  // 参考の爪の縦横比と、先端の形の目安
+  function analyzeCutout(key, img, w, h) {
+    const sp = alphaSpans(key, img, w, h);
+    let top = 0, bot = h - 1;
+    while (top < h && isNaN(sp.L[top])) top++;
+    while (bot > 0 && isNaN(sp.L[bot])) bot--;
+    const len = Math.max(1, bot - top + 1);
+    const rowAt = (t) => { const y = Math.round(top + t * len); return isNaN(sp.L[y]) ? 0 : sp.R[y] - sp.L[y]; };
+    const r = rowAt(0.06) / (sp.maxW || 1);
+    const shape = r >= 0.8 ? 'square' : r >= 0.6 ? 'squareoval' : r >= 0.42 ? (len / sp.maxW > 1.6 ? 'oval' : 'round') : r >= 0.25 ? 'almond' : 'point';
+    return { aspect: len / (sp.maxW || 1), shape };
+  }
+  function localSpan(poly, y) {
+    let l = Infinity, r = -Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      if ((a.y - y) * (b.y - y) <= 0 && a.y !== b.y) {
+        const x = a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x);
+        l = Math.min(l, x); r = Math.max(r, x);
+      }
+    }
+    return l <= r ? [l, r] : null;
+  }
+  const warpCache = new Map();
+  function shapeWarp(srcKey, src, f) {
+    const key = srcKey + '|' + f.contour.map((p) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(';');
+    const hit = warpCache.get(key);
+    if (hit) return hit;
+    const W = Math.ceil(f.W), H = Math.ceil(f.H);
+    const c = U.makeCanvas(W, H);
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    // 自分の爪の輪郭を爪の座標（X:左→右, Y:先端→根元）へ
+    const poly = f.contour.map((p) => {
+      const dx = p.x - f.C.x, dy = p.y - f.C.y;
+      return { x: dx * f.u.x + dy * f.u.y + f.W / 2, y: f.H / 2 - (dx * f.v.x + dy * f.v.y) };
+    });
+    const sp = alphaSpans(srcKey, src.img, src.w, src.h);
+    let top = 0, bot = src.h - 1;
+    while (top < src.h && isNaN(sp.L[top])) top++;
+    while (bot > 0 && isNaN(sp.L[bot])) bot--;
+    const kx = src.img.naturalWidth / src.w, ky = src.img.naturalHeight / src.h;
+    const len = Math.max(1, bot - top + 1);
+    for (let y = 0; y < H; y++) {
+      const m = localSpan(poly, y + 0.5);
+      if (!m) continue;
+      let sy = Math.min(bot, Math.max(top, Math.floor(top + ((y + 0.5) / H) * len)));
+      let k2 = 0;
+      while (isNaN(sp.L[sy]) && k2 < len) { sy += sy < (top + bot) / 2 ? 1 : -1; k2++; }
+      if (isNaN(sp.L[sy])) continue;
+      const sl = sp.L[sy], sr = sp.R[sy];
+      const rowH = Math.max(1, len / H);
+      g.drawImage(src.img, sl * kx, sy * ky, Math.max(1, sr - sl) * kx, rowH * ky, m[0] - 1, y, m[1] - m[0] + 2, 1.01);
+    }
+    cacheSet(warpCache, key, c, 20);
+    return c;
+  }
+
   /* 写真柄・素材の基準倍率（A 比率を保つ：爪全体を覆う最小の倍率） */
   function artBaseK(W, H, iw, ih) { return Math.max(W / iw, H / ih); }
 
@@ -105,7 +186,10 @@
         p.translate(W / 2 + t.x * W, t.y * H);
         p.rotate((t.rot * Math.PI) / 180);
         p.scale(t.scale * (t.sx || 1) * (t.flip ? -1 : 1), t.scale * (t.sy || 1) * (t.aspect || 1));
-        if (t.fit === 'stretch') {
+        if (t.fit === 'shape') {
+          const key = (a.cutoutId || a.assetId) + '|' + iw + 'x' + ih;
+          p.drawImage(shapeWarp(key, src, f), -W / 2, 0, W, H);
+        } else if (t.fit === 'stretch') {
           p.drawImage(src.img, -W / 2, 0, W, H);
         } else {
           const k = artBaseK(W, H, iw, ih);
@@ -309,7 +393,7 @@
     out.push('ベース: ' + (design.color ? design.color.toUpperCase() : 'なし'));
     if (design.art) {
       if (design.art.kind === 'pattern') out.push('柄: ' + (M.PATTERN_NAMES[design.art.id] || design.art.id));
-      else if (design.art.kind === 'cutout') out.push('柄: 写真から切り抜き（' + (design.tf.fit === 'stretch' ? 'B 爪に合わせて変形' : 'A 比率を保持') + '）');
+      else if (design.art.kind === 'cutout') out.push('柄: 写真から切り抜き（' + ({ shape: '形に沿わせる', stretch: 'B 爪に合わせて変形' }[design.tf.fit] || 'A 比率を保持') + '）');
       else out.push('柄: 読み込んだ素材');
     }
     out.push('不透明度 ' + Math.round(design.opacity * 100) + '%');
@@ -419,5 +503,5 @@
 
   function clearCaches() { layerCache.clear(); lumCache.clear(); }
 
-  ND.render = { artBaseK, drawArtGhost, nailLayer, cachedLayer, composite, closeup, sheet, describe, clearCaches };
+  ND.render = { analyzeCutout, artBaseK, drawArtGhost, nailLayer, cachedLayer, composite, closeup, sheet, describe, clearCaches };
 })();
