@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!--BUILD:HEAD-START-->
+<title>ネイル試着ノート</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="css/app.css">
+<!--BUILD:HEAD-END-->
+</head>
+<body>
+<!--BUILD:BODY-START-->
+<div id="app" class="app">
+  <header class="topbar">
+    <div class="brand">ネイル試着ノート</div>
+    <div class="topbar-actions">
+      <button type="button" class="tb-btn" id="btnUndo" aria-label="元に戻す">↶<span>戻す</span></button>
+      <button type="button" class="tb-btn" id="btnRedo" aria-label="やり直す">↷<span>進む</span></button>
+      <button type="button" class="tb-btn" id="btnCompare" aria-pressed="false">比較<span id="compareLabel">変更後</span></button>
+      <button type="button" class="tb-btn" id="btnGuide" aria-pressed="true">ガイド<span id="guideLabel">表示</span></button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="stage-wrap" aria-label="写真">
+      <div class="stage" id="stage">
+        <canvas id="stageCanvas"></canvas>
+        <canvas id="loupe" class="loupe" width="300" height="300" hidden></canvas>
+        <div class="stage-badge" id="stageBadge" hidden></div>
+        <div class="stage-hint" id="stageHint" hidden></div>
+        <div class="stage-tools">
+          <div class="seg" role="group" aria-label="1本指の操作">
+            <button type="button" id="toolEdit" class="seg-btn">点を編集</button>
+            <button type="button" id="toolPan" class="seg-btn">写真を動かす</button>
+          </div>
+          <button type="button" class="round-btn" id="zoomIn" aria-label="拡大">＋</button>
+          <button type="button" class="round-btn" id="zoomOut" aria-label="縮小">－</button>
+          <button type="button" class="round-btn wide" id="zoomFit">全体</button>
+          <button type="button" class="round-btn wide" id="zoomNail">この爪</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="side">
+      <nav class="fingers" id="fingerBar" aria-label="編集する指"></nav>
+      <div class="panel" id="panel"></div>
+    </section>
+  </main>
+
+  <nav class="tabbar" id="tabbar" aria-label="モード">
+    <button type="button" data-tab="contour"><b>①</b>輪郭</button>
+    <button type="button" data-tab="photo"><b>写</b>写真から</button>
+    <button type="button" data-tab="design"><b>柄</b>デザイン</button>
+    <button type="button" data-tab="custom"><b>色</b>自分で作る</button>
+    <button type="button" data-tab="export"><b>保</b>保存</button>
+  </nav>
+
+  <div class="start" id="startScreen" hidden>
+    <div class="start-card">
+      <p class="start-eyebrow">端末内だけで動くネイル試着</p>
+      <h1>自分の爪で、色と柄を試す</h1>
+      <div class="guide-box">
+        <strong>撮影ガイド</strong>
+        <p>明るい場所で、爪が隠れないように手の甲側から撮影してください。</p>
+        <ul>
+          <li>片手・指をそろえすぎず、5本の爪が見える写真が目安です</li>
+          <li>見えない指は後でスキップできます</li>
+        </ul>
+      </div>
+      <div class="start-actions">
+        <button type="button" class="btn primary big" id="startPick">手の写真を選ぶ</button>
+        <button type="button" class="btn big" id="startDemo">図解デモで試す</button>
+        <button type="button" class="btn big" id="startResume" hidden>前回の作業を再開</button>
+        <button type="button" class="btn ghost" id="startImport">編集データ（.json）を読み込む</button>
+      </div>
+      <p class="fine">写真は端末の中だけで処理し、外部へ送信しません。生成AIは使いません。</p>
+    </div>
+  </div>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h2 id="modalTitle"></h2>
+      <div id="modalBody"></div>
+      <div class="modal-actions" id="modalActions"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <input type="file" id="filePhoto" accept="image/*" hidden>
+  <input type="file" id="fileRef" accept="image/*" hidden>
+  <input type="file" id="fileMaterial" accept="image/png,image/webp,image/*" hidden>
+  <input type="file" id="fileProject" accept="application/json,.json" hidden>
+</div>
+<!--BUILD:BODY-END-->
+<!--BUILD:SCRIPTS-START-->
+<script src="js/util.js"></script>
+<script src="js/store.js"></script>
+<script src="js/materials.js"></script>
+<script src="js/render.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/app.js"></script>
+<!--BUILD:SCRIPTS-END-->
+</body>
+</html>
