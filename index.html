@@ -63,10 +63,7 @@
       <div class="guide-box">
         <strong>撮影ガイド</strong>
         <p>明るい場所で、爪が隠れないように手の甲側から撮影してください。</p>
-        <ul>
-          <li>片手・指をそろえすぎず、5本の爪が見える写真が目安です</li>
-          <li>見えない指は後でスキップできます</li>
-        </ul>
+        <button type="button" class="btn" id="startGuide">撮り方を図で見る（1分）</button>
       </div>
       <div class="start-actions">
         <button type="button" class="btn primary big" id="startPick">手の写真を選ぶ</button>
@@ -75,6 +72,47 @@
         <button type="button" class="btn ghost" id="startImport">編集データ（.json）を読み込む</button>
       </div>
       <p class="fine">写真は端末の中だけで処理し、外部へ送信しません。生成AIは使いません。</p>
+    </div>
+  </div>
+
+  <div class="guide" id="guideScreen" hidden>
+    <div class="guide-card" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+      <div class="guide-head">
+        <h2 id="guideTitle">手の写真の撮り方</h2>
+        <button type="button" class="btn" id="guideClose">閉じる</button>
+      </div>
+      <p class="guide-lead">5本の爪のふちがはっきり見える写真だと、輪郭を作りやすく、色の見え方も正確になります。</p>
+
+      <figure class="guide-examples" aria-label="良い例と悪い例">
+        <div class="ex ok"><img alt="良い例：明るく、真上から、指が離れている" data-guide="good"><span class="tag">OK</span><span class="cap">明るい・真上から・指が離れている</span></div>
+        <div class="ex ng"><img alt="悪い例：指が重なっている" data-guide="closed"><span class="tag">NG</span><span class="cap">指が重なっている</span></div>
+        <div class="ex ng"><img alt="悪い例：斜めから撮っている" data-guide="angle"><span class="tag">NG</span><span class="cap">斜めから撮っている</span></div>
+        <div class="ex ng"><img alt="悪い例：暗い" data-guide="dark"><span class="tag">NG</span><span class="cap">暗い</span></div>
+        <div class="ex ng"><img alt="悪い例：爪が光って白く飛んでいる" data-guide="glare"><span class="tag">NG</span><span class="cap">フラッシュや照明で爪が光る</span></div>
+        <div class="ex ng"><img alt="悪い例：手が小さく写っている" data-guide="far"><span class="tag">NG</span><span class="cap">遠すぎて手が小さい</span></div>
+        <figcaption class="note">図はイメージです（実写ではありません）。</figcaption>
+      </figure>
+
+      <ol class="guide-steps">
+        <li><b>明るい場所を選ぶ</b><span>昼間の窓ぎわか、明るい照明の下がおすすめです。フラッシュはオフにします（爪が光って色が見えにくくなります）。</span></li>
+        <li><b>手を置く</b><span>撮る手を、手の甲を上にして机に置きます。指は軽く開いて、指どうしが重ならないようにします。指輪・袖・髪が爪にかからないようにします。</span></li>
+        <li><b>真上から撮る</b><span>もう一方の手でiPhone・iPadを持ち、爪の真上から撮ります。手首から指先までが画面に入る距離（20〜30cmが目安）にし、ズームは使いません。</span></li>
+        <li><b>ピントを合わせる</b><span>画面の爪のあたりをタップしてピントを合わせ、ブレないように撮ります。</span></li>
+        <li><b>見直す</b><span>5本の爪のふちが見えればOKです。親指は横を向きやすいので、見えにくい場合はアプリ内でスキップできます。</span></li>
+      </ol>
+
+      <div class="guide-tips">
+        <p><b>うまく撮れないとき</b></p>
+        <ul>
+          <li>片手で撮りにくいときは、家族や友人に撮ってもらうと簡単です。</li>
+          <li>フィルターや美肌加工はオフにしてください（爪の色が変わります）。</li>
+          <li>次の「写真を選ぶ」で、写真ライブラリから選ぶか、その場で「写真を撮る」を選べます（表示は端末やブラウザによって異なります）。</li>
+        </ul>
+      </div>
+
+      <div class="guide-actions">
+        <button type="button" class="btn primary big" id="guidePick">この撮り方で写真を選ぶ</button>
+      </div>
     </div>
   </div>
 

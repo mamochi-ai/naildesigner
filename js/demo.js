@@ -89,13 +89,15 @@
   }
 
   /* 図解の手（右手の甲側）。3本は輪郭入り、2本は自分で輪郭を置いて試せる */
-  function hand() {
+  function hand(opts) {
+    opts = opts || {};
     const W = 1200, H = 1500;
     const c = U.makeCanvas(W, H);
     const ctx = c.getContext('2d');
     const bg = ctx.createLinearGradient(0, 0, 0, H);
     bg.addColorStop(0, '#efe9e2'); bg.addColorStop(1, '#ddd4cb');
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = bg;
+    if (opts.background !== false) ctx.fillRect(0, 0, W, H);
     const fingers = [
       { id: 'thumb', base: { x: 360, y: 1170 }, tip: { x: 175, y: 870 }, w: 128 },
       { id: 'index', base: { x: 455, y: 960 }, tip: { x: 405, y: 430 }, w: 112 },
@@ -103,6 +105,10 @@
       { id: 'ring', base: { x: 735, y: 960 }, tip: { x: 782, y: 432 }, w: 108 },
       { id: 'pinky', base: { x: 860, y: 1040 }, tip: { x: 962, y: 665 }, w: 92 },
     ];
+    if (opts.closed) {
+      // 指を閉じて重なった状態（撮影ガイドの悪い例）
+      fingers.slice(1).forEach((f) => { f.tip = { x: f.tip.x + (598 - f.tip.x) * 0.75, y: f.tip.y + 40 }; });
+    }
     ctx.fillStyle = '#c89479';
     ctx.beginPath(); ctx.ellipse(615, 1270, 345, 330, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#e6bea2';
@@ -119,9 +125,11 @@
       drawNail(ctx, cx, cy, dir, nw, nl);
       shapes[f.id] = sampleShape(cx, cy, dir, nw, nl, f.id === 'middle' ? 10 : 9);
     });
-    ctx.fillStyle = 'rgba(70,55,58,0.75)';
-    ctx.font = '600 34px "Hiragino Sans", sans-serif';
-    ctx.fillText('図解デモ（実写ではありません）', 40, 70);
+    if (opts.label !== false) {
+      ctx.fillStyle = 'rgba(70,55,58,0.75)';
+      ctx.font = '600 34px "Hiragino Sans", sans-serif';
+      ctx.fillText('図解デモ（実写ではありません）', 40, 70);
+    }
     return { canvas: c, shapes, preset: ['index', 'middle', 'ring'] };
   }
 
@@ -187,5 +195,47 @@
     return sample;
   }
 
-  ND.demo = { hand, reference, sampleFinger };
+  /* 撮影ガイド用の図解（良い例・悪い例） */
+  const guideCache = {};
+  function guideImage(kind) {
+    if (guideCache[kind]) return guideCache[kind];
+    const W = 240, H = 280;
+    const c = U.makeCanvas(W, H);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ebe5dd';
+    ctx.fillRect(0, 0, W, H);
+    const src = hand({ label: false, closed: kind === 'closed', background: false });
+    const sx = 60, sy = 220, sw = 1080, sh = 1260; // 手の部分だけを切り出す
+    if (kind === 'angle') {
+      // 斜めから撮ると爪が縮んで見える
+      ctx.setTransform(1, 0, -0.35, 0.5, 60, 80);
+      ctx.drawImage(src.canvas, sx, sy, sw, sh, 0, 0, W, H);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    } else if (kind === 'far') {
+      ctx.drawImage(src.canvas, sx, sy, sw, sh, W * 0.37, H * 0.4, W * 0.26, H * 0.26);
+    } else {
+      ctx.drawImage(src.canvas, sx, sy, sw, sh, 0, 0, W, H);
+    }
+    if (kind === 'dark') {
+      ctx.fillStyle = 'rgba(25,18,14,0.66)';
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (kind === 'glare') {
+      const k = W / sw;
+      Object.keys(src.shapes).forEach((id) => {
+        const t = src.shapes[id].tip, b = src.shapes[id].base;
+        const x = ((t.x + b.x) / 2 - sx) * k, y = ((t.y + b.y) / 2 - sy) * k;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, 16);
+        g.addColorStop(0, 'rgba(255,255,255,1)');
+        g.addColorStop(0.6, 'rgba(255,255,255,0.9)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.fill();
+      });
+    }
+    guideCache[kind] = c.toDataURL('image/png');
+    return guideCache[kind];
+  }
+
+  ND.demo = { hand, reference, sampleFinger, guideImage };
 })();

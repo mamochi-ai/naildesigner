@@ -740,6 +740,7 @@
       return;
     }
     panel.appendChild(group('点を置く', contourControls(n.shape, false)));
+    panel.appendChild(h('div', { class: 'row' }, [btn('爪が見えにくい？ 撮り方ガイド', openGuide, 'ghost')]));
     panel.appendChild(h('div', { class: 'row' }, [
       btn('この指はスキップ', () => { n.skip = true; commit(); markDirty(); renderPanel(); }),
       btn('次の指へ', () => {
@@ -1136,6 +1137,7 @@
     ]));
     panel.appendChild(group('写真', [
       h('div', { class: 'row' }, [
+        btn('撮り方ガイド', openGuide),
         btn('別の手の写真に替える', async () => {
           if (!(await confirmDialog('写真を替えますか？', '今の輪郭とデザインはリセットされます（「戻す」で元に戻せます）。', '写真を選ぶ'))) return;
           $('filePhoto').click();
@@ -1244,6 +1246,8 @@
       commit();
       hideStart();
       renderAll();
+      const issues = checkPhoto(photoCanvas);
+      if (issues.length) showPhotoIssues(issues);
       toast(r.scaled ? '写真を ' + r.w + '×' + r.h + ' に縮小して読み込みました（元 ' + r.origW + '×' + r.origH + '）' : '写真を読み込みました');
     } catch (e) { showError(e); }
   }
@@ -1399,6 +1403,46 @@
   }
   function hideStart() { $('startScreen').hidden = true; }
 
+  function openGuide() {
+    document.querySelectorAll('#guideScreen img[data-guide]').forEach((im) => {
+      if (!im.getAttribute('src')) im.src = ND.demo.guideImage(im.dataset.guide);
+    });
+    $('guideScreen').hidden = false;
+    $('guideScreen').scrollTop = 0;
+    try { localStorage.setItem('nd_guide_seen', '1'); } catch (_) { /* noop */ }
+  }
+  function closeGuide() { $('guideScreen').hidden = true; }
+
+  /* 読み込んだ写真の明るさ・大きさを目安としてチェック（自動で撮り直しを強制はしない） */
+  function checkPhoto(canvas) {
+    const n = 64;
+    const c = U.makeCanvas(n, n);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvas, 0, 0, n, n);
+    const d = ctx.getImageData(0, 0, n, n).data;
+    let sum = 0, bright = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      sum += l; if (l > 248) bright++;
+    }
+    const mean = sum / (n * n);
+    const issues = [];
+    if (mean < 70) issues.push('写真が暗めです。明るい場所で撮ると、色の見え方が正確になります。');
+    if (bright / (n * n) > 0.3) issues.push('白く飛んでいる部分が多めです。フラッシュをオフにするか、光が直接当たらない場所で撮ってみてください。');
+    if (Math.min(canvas.width, canvas.height) < 700) issues.push('写真が小さめです（' + canvas.width + '×' + canvas.height + '）。拡大すると粗く見えることがあります。');
+    return issues;
+  }
+  function showPhotoIssues(issues) {
+    const body = h('div', null, [
+      h('ul', { class: 'photo-issues' }, issues.map((t) => h('li', { text: t }))),
+      note('目安のチェックです。このまま使っても問題ありません。'),
+    ]);
+    openModal('写真の確認', body, [
+      { label: '撮り方を見る', onclick: () => { closeModal(); openGuide(); } },
+      { label: 'このまま使う', primary: true, onclick: closeModal },
+    ]);
+  }
+
   function syncCompare() {
     $('btnCompare').setAttribute('aria-pressed', ui.compare ? 'true' : 'false');
     $('compareLabel').textContent = ui.compare ? '変更前' : '変更後';
@@ -1452,7 +1496,15 @@
     onFile('fileMaterial', loadMaterialFile);
     onFile('fileProject', importProjectFile);
 
-    $('startPick').addEventListener('click', () => $('filePhoto').click());
+    // 初めて写真を選ぶときは、先に撮り方ガイドを見せる
+    $('startPick').addEventListener('click', () => {
+      let seen = false;
+      try { seen = localStorage.getItem('nd_guide_seen') === '1'; } catch (_) { /* noop */ }
+      if (seen) $('filePhoto').click(); else openGuide();
+    });
+    $('startGuide').addEventListener('click', openGuide);
+    $('guideClose').addEventListener('click', closeGuide);
+    $('guidePick').addEventListener('click', () => { closeGuide(); $('filePhoto').click(); });
     $('startDemo').addEventListener('click', loadDemo);
     $('startResume').addEventListener('click', resumeSaved);
     $('startImport').addEventListener('click', () => $('fileProject').click());
