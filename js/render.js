@@ -82,30 +82,49 @@
     return L;
   }
 
+  /* 写真柄・素材の基準倍率（A 比率を保つ：爪全体を覆う最小の倍率） */
+  function artBaseK(W, H, iw, ih) { return Math.max(W / iw, H / ih); }
+
   function drawArt(p, f, d, env) {
     const W = f.W, H = f.H, t = d.tf, a = d.art;
     p.save();
-    p.globalAlpha = d.artOpacity == null ? 1 : d.artOpacity;
-    p.translate(W / 2 + t.x * W, H / 2 + t.y * H);
-    p.rotate((t.rot * Math.PI) / 180);
-    p.scale(t.scale * (t.flip ? -1 : 1), t.scale * t.aspect);
+    p.globalAlpha *= d.artOpacity == null ? 1 : d.artOpacity;
     if (a.kind === 'pattern') {
+      p.translate(W / 2 + t.x * W, H / 2 + t.y * H);
+      p.rotate((t.rot * Math.PI) / 180);
+      p.scale(t.scale * (t.flip ? -1 : 1), t.scale * t.aspect);
       const S = Math.ceil(2.3 * Math.max(W, H));
       const tex = patternTexture(a.id, a.fg || '#ffffff', W, S);
       p.drawImage(tex, -S / 2, -S / 2);
     } else {
+      // 写真柄は「先端の中央」を基準に置く。大きさを変えても先端側の柄がずれない
       const src = a.kind === 'cutout' ? env.cutoutImg(a.cutoutId) : env.assetImg(a.assetId);
       if (src) {
         const iw = src.w, ih = src.h;
+        p.translate(W / 2 + t.x * W, t.y * H);
+        p.rotate((t.rot * Math.PI) / 180);
+        p.scale(t.scale * (t.flip ? -1 : 1), t.scale * t.aspect);
         if (t.fit === 'stretch') {
-          p.drawImage(src.img, -W / 2, -H / 2, W, H);
+          p.drawImage(src.img, -W / 2, 0, W, H);
         } else {
-          const k = Math.max(W / iw, H / ih);
-          p.drawImage(src.img, (-iw * k) / 2, (-ih * k) / 2, iw * k, ih * k);
+          const k = artBaseK(W, H, iw, ih);
+          p.drawImage(src.img, (-iw * k) / 2, 0, iw * k, ih * k);
         }
       }
     }
     p.restore();
+  }
+
+  // 柄を動かしている間、爪の外にはみ出した部分も薄く見せる（ctx は画像座標）
+  function drawArtGhost(ctx, shape, design, env, alpha) {
+    const f = U.nailFrame(shape);
+    if (!f || !design || !design.art) return;
+    const T = U.localToImage(f, 0, 0);
+    ctx.save();
+    ctx.transform(T[0], T[1], T[2], T[3], T[4], T[5]);
+    ctx.globalAlpha = alpha;
+    drawArt(ctx, f, design, env);
+    ctx.restore();
   }
 
   function drawFrench(p, f, fr) {
@@ -382,5 +401,5 @@
 
   function clearCaches() { layerCache.clear(); lumCache.clear(); }
 
-  ND.render = { nailLayer, cachedLayer, composite, closeup, sheet, describe, clearCaches };
+  ND.render = { artBaseK, drawArtGhost, nailLayer, cachedLayer, composite, closeup, sheet, describe, clearCaches };
 })();

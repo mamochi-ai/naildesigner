@@ -19,7 +19,7 @@
 
   // 編集状態（履歴に含めない表示上の状態）
   const ui = {
-    tab: 'contour', finger: 'index', tool: 'edit', place: 'point', selPt: -1, selDeco: -1,
+    tab: 'contour', finger: 'index', tool: 'edit', artTool: 'art', place: 'point', selPt: -1, selDeco: -1,
     compare: false, guides: true, pendingCut: null, allTargets: {},
     views: { photo: { zoom: 1, cx: 0, cy: 0 }, ref: { zoom: 1, cx: 0, cy: 0 } },
     saveStatus: '', lastSaved: null, idbOK: true,
@@ -36,6 +36,7 @@
     hist.future = [];
     updateUndoButtons();
     renderFingers();
+    renderTabs();
     scheduleSave();
   }
   function resetHistory() {
@@ -136,6 +137,14 @@
   /* ================= 編集対象 ================= */
   const refMode = () => ui.tab === 'photo' && !!state.refDraft && !!refCanvas;
   const editingContour = () => ui.tab === 'contour' || refMode();
+  // 選択中の爪に、指で動かせる柄（写真柄・素材・柄）があるか
+  function artEditable() {
+    if (refMode() || ui.compare || !state.photo) return false;
+    if (!['photo', 'design', 'custom'].includes(ui.tab)) return false;
+    const n = state.nails[ui.finger];
+    return !n.skip && n.shape.points.length >= 3 && !!(n.design && n.design.art);
+  }
+  const artActive = () => artEditable() && ui.artTool === 'art';
   function target() {
     if (refMode()) return { kind: 'ref', shape: state.refDraft.shape };
     if (!state.photo) return null;
@@ -278,6 +287,16 @@
 
   function drawOverlay(ctx, X) {
     if (refMode()) { drawShapeEditor(ctx, X, state.refDraft.shape); drawDrag(ctx); return; }
+    if (gesture && (gesture.type === 'art' || gesture.type === 'artpinch')) {
+      const n = state.nails[ui.finger];
+      ctx.save();
+      ctx.transform(X.scale, 0, 0, X.scale, X.tx, X.ty);
+      R.drawArtGhost(ctx, n.shape, n.design, env(), 0.38);
+      ctx.restore();
+      const f = U.nailFrame(n.shape);
+      if (f) strokeShape(ctx, f.contour.map((p) => toScreen(p, X)), true, 'rgba(255,255,255,0.95)', '#d6336c', 4, 2);
+      return;
+    }
     const editing = ui.tab === 'contour';
     FINGERS.forEach((F) => {
       const n = state.nails[F.id];
@@ -322,6 +341,11 @@
       else if (ui.place === 'tip') msg = '先端の位置をタップしてください';
       else if (sh && sh.points.length < 3) msg = who + 'のふちをタップして点を置きます（目安6〜12点）';
       else if (sh && sh.guessed) msg = '根元・先端を仮置きしました。違う場合は「向きを反転」か印をドラッグ';
+    }
+    if (!msg && artEditable() && ui.guides !== false) {
+      msg = ui.artTool === 'art'
+        ? '1本指：柄を移動　2本指：大きさ・向き'
+        : '柄を指で動かすには「柄を動かす」';
     }
     hint.hidden = !msg;
     hint.textContent = msg;
@@ -404,6 +428,17 @@
     const p = localPt(e);
     pointers.set(e.pointerId, p);
     const X = viewXf();
+    if (pointers.size === 2 && artActive()) {
+      const [a, b] = [...pointers.values()];
+      const n = state.nails[ui.finger];
+      gesture = {
+        type: 'artpinch', d0: U.dist(a, b) || 1, ang0: Math.atan2(b.y - a.y, b.x - a.x),
+        m0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, tf0: U.clone(n.design.tf), f: U.nailFrame(n.shape),
+      };
+      hideLoupe();
+      requestDraw();
+      return;
+    }
     if (pointers.size === 2) {
       cancelSingle();
       const [a, b] = [...pointers.values()];
@@ -424,12 +459,21 @@
         gesture = Object.assign(start, { type: 'place', cur: p });
         showLoupe(p, toImage(p, X));
       }
+    } else if (artActive()) {
+      const n = state.nails[ui.finger];
+      gesture = Object.assign(start, { type: 'art', tf0: U.clone(n.design.tf), f: U.nailFrame(n.shape), moved: false });
     } else {
       const v = ui.views[viewKey()];
       gesture = Object.assign(start, { type: 'pan', cx0: v.cx, cy0: v.cy, moved: false });
     }
     requestDraw();
   });
+
+  // 画面上の移動量を、爪の座標系（幅・長さに対する割合）に直す
+  function artShift(f, dxs, dys, X) {
+    const dx = dxs / X.scale, dy = dys / X.scale;
+    return { x: (dx * f.u.x + dy * f.u.y) / f.W, y: -(dx * f.v.x + dy * f.v.y) / f.H };
+  }
 
   stage.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) return;
@@ -449,6 +493,27 @@
       v.cx = anchor.x - (m.x - st.w / 2) / sc;
       v.cy = anchor.y - (m.y - st.h / 2) / sc;
       requestDraw();
+    } else if (gesture.type === 'art') {
+      const tf = state.nails[ui.finger].design.tf;
+      if (U.dist(p, gesture.s) > 6) gesture.moved = true;
+      const sh = artShift(gesture.f, p.x - gesture.s.x, p.y - gesture.s.y, X);
+      tf.x = U.clamp(gesture.tf0.x + sh.x, -1.5, 1.5);
+      tf.y = U.clamp(gesture.tf0.y + sh.y, -1.5, 1.5);
+      markDirty();
+    } else if (gesture.type === 'artpinch' && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()];
+      const tf = state.nails[ui.finger].design.tf;
+      const d = U.dist(a, b) || 1;
+      const ang = Math.atan2(b.y - a.y, b.x - a.x);
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      tf.scale = U.clamp(gesture.tf0.scale * d / gesture.d0, 0.2, 5);
+      let r = gesture.tf0.rot + ((ang - gesture.ang0) * 180) / Math.PI;
+      r = ((r + 540) % 360) - 180;
+      tf.rot = r;
+      const sh = artShift(gesture.f, m.x - gesture.m0.x, m.y - gesture.m0.y, X);
+      tf.x = U.clamp(gesture.tf0.x + sh.x, -1.5, 1.5);
+      tf.y = U.clamp(gesture.tf0.y + sh.y, -1.5, 1.5);
+      markDirty();
     } else if (gesture.type === 'pan') {
       const v = ui.views[viewKey()];
       if (U.dist(p, gesture.s) > 6) gesture.moved = true;
@@ -480,9 +545,11 @@
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
     if (!gesture) return;
-    if (gesture.type === 'pinch') {
+    if (gesture.type === 'pinch' || gesture.type === 'artpinch') {
+      if (gesture.type === 'artpinch') { commit(); renderPanelSoft(); markDirty(); }
       if (pointers.size === 0) gesture = null;
       else gesture = { type: 'none' }; // 残った指は離すまで無視
+      requestDraw();
       return;
     }
     if (pointers.size) return;
@@ -496,7 +563,8 @@
     } else if (g.type === 'drag') {
       if (g.moved) { commit(); renderPanelSoft(); }
       requestDraw();
-    } else if (g.type === 'pan') {
+    } else if (g.type === 'pan' || g.type === 'art') {
+      if (g.type === 'art' && g.moved) { commit(); renderPanelSoft(); markDirty(); }
       if (!g.moved && performance.now() - g.t < 500 && !refMode()) tapSelect(toImage(g.s, X));
     }
     requestDraw();
@@ -531,6 +599,24 @@
     v.cx = anchor.x - (sp.x - st.w / 2) / sc;
     v.cy = anchor.y - (sp.y - st.h / 2) / sc;
     requestDraw();
+  }
+
+  function zoomToNail() {
+    const f = U.nailFrame(state.nails[ui.finger].shape);
+    if (!f) return false;
+    const X = viewXf();
+    const bw = f.bounds.x1 - f.bounds.x0, bh = f.bounds.y1 - f.bounds.y0;
+    const st = stageSize();
+    const v = ui.views.photo;
+    v.zoom = U.clamp(Math.min(st.w / bw, st.h / bh) * 0.45 / X.fit, 0.5, 14);
+    v.cx = (f.bounds.x0 + f.bounds.x1) / 2; v.cy = (f.bounds.y0 + f.bounds.y1) / 2;
+    requestDraw();
+    return true;
+  }
+  // 柄を指で合わせやすいよう、爪が小さく表示されているときは拡大する
+  function zoomToNailIfSmall() {
+    const f = U.nailFrame(state.nails[ui.finger].shape);
+    if (f && f.W * viewXf().scale < 140) zoomToNail();
   }
 
   function addAt(p) {
@@ -661,10 +747,12 @@
     document.querySelectorAll('#tabbar button').forEach((b) => {
       b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false');
     });
-    const showTools = editingContour();
-    document.querySelector('.stage-tools .seg').hidden = !showTools;
-    $('toolEdit').setAttribute('aria-pressed', ui.tool === 'edit' ? 'true' : 'false');
-    $('toolPan').setAttribute('aria-pressed', ui.tool === 'pan' ? 'true' : 'false');
+    const contour = editingContour(), art = !contour && artEditable();
+    document.querySelector('.stage-tools .seg').hidden = !(contour || art);
+    $('toolEdit').textContent = contour ? '点を編集' : '柄を動かす';
+    const editOn = contour ? ui.tool === 'edit' : ui.artTool === 'art';
+    $('toolEdit').setAttribute('aria-pressed', editOn ? 'true' : 'false');
+    $('toolPan').setAttribute('aria-pressed', editOn ? 'false' : 'true');
     $('zoomNail').hidden = refMode();
   }
   function setTab(t) {
@@ -780,9 +868,25 @@
   }
 
   /* --- 位置・大きさの調整（写真柄・素材・柄で共通） --- */
-  function tfControls(d, showFit) {
+  function tfControls(d, showFit, shape) {
     const t = d.tf;
     const kids = [];
+    kids.push(note('写真の上を1本指でなぞると柄が動き、2本指で大きさと向きを変えられます。細かい調整は下のスライダーで。'));
+    const src = d.art && d.art.kind === 'cutout' ? env().cutoutImg(d.art.cutoutId) : d.art && d.art.kind === 'image' ? env().assetImg(d.art.assetId) : null;
+    const f = shape && U.nailFrame(shape);
+    if (src && f && t.fit !== 'stretch') {
+      // 参考の爪と自分の爪の大きさが違うときの「ひと押し合わせ」
+      const k0 = R.artBaseK(f.W, f.H, src.w, src.h);
+      const fitTo = (k) => {
+        d.tf = Object.assign(M.defaultDesign().tf, { fit: t.fit, flip: t.flip, scale: U.clamp(k / k0, 0.2, 5) });
+        commit(); markDirty(); renderPanel();
+      };
+      kids.push(h('div', { class: 'row' }, [
+        btn('爪の幅に合わせる', () => fitTo(f.W / src.w)),
+        btn('爪の長さに合わせる', () => fitTo(f.H / src.h)),
+      ]));
+      kids.push(note('どちらも先端をそろえて置きます。柄が足りない部分は元の爪が見えます。'));
+    }
     if (showFit) {
       kids.push(h('div', { class: 'chips', role: 'group', 'aria-label': '合わせ方' }, [
         ['clip', 'A 比率を保って爪で切る'], ['stretch', 'B 爪の長さ・幅に合わせる'],
@@ -852,7 +956,7 @@
       if (cut) panel.appendChild(cutoutCompare(n, cut));
     }
     if (n.design && n.design.art && n.design.art.kind === 'cutout') {
-      panel.appendChild(group('位置・大きさの調整', tfControls(n.design, true)));
+      panel.appendChild(group('位置・大きさの調整', tfControls(n.design, true, n.shape)));
       panel.appendChild(copyTargets((id) => {
         const d = ensureDesign(id);
         d.art = U.clone(n.design.art); d.tf = U.clone(n.design.tf);
@@ -863,6 +967,10 @@
     }
   }
 
+  // 見比べ用の拡大図は画面の解像度で描く（小さく描いて引き伸ばすと縁がガタガタになる）
+  const thumbScale = () => Math.min(3, Math.max(2, window.devicePixelRatio || 1));
+  const TW = () => Math.round(160 * thumbScale()), TH = () => Math.round(200 * thumbScale());
+  const thumbImg = (canvas, alt) => h('img', { src: canvas.toDataURL('image/jpeg', 0.9), alt });
   function cutoutCompare(n, cut) {
     const e = env();
     const f = U.nailFrame(n.shape);
@@ -875,7 +983,7 @@
       return d;
     };
     const cells = [];
-    cells.push(h('div', { class: 'thumb' }, [R.closeup(photoCanvas, f, 160, 200, R.cachedLayer('__none', n.shape, null, e)), h('span', { class: 'cap', text: '元の爪' })]));
+    cells.push(h('div', { class: 'thumb' }, [thumbImg(R.closeup(photoCanvas, f, TW(), TH(), null), '元の爪'), h('span', { class: 'cap', text: '元の爪' })]));
     ['clip', 'stretch'].forEach((fit) => {
       const d = mk(fit);
       const layer = R.nailLayer(n.shape, d, e, ui.finger);
@@ -884,10 +992,12 @@
         type: 'button', class: 'thumb', 'aria-pressed': active ? 'true' : 'false',
         onclick: () => {
           n.design = d;
+          ui.artTool = 'art';
           commit(); markDirty(); renderPanel();
+          zoomToNailIfSmall();
           toast(fname(ui.finger) + 'に適用しました（' + (fit === 'clip' ? 'A' : 'B') + '）');
         },
-      }, [R.closeup(photoCanvas, f, 160, 200, layer), h('span', { class: 'cap', text: fit === 'clip' ? 'A 比率を保つ' : 'B 爪に合わせる' })]));
+      }, [thumbImg(R.closeup(photoCanvas, f, TW(), TH(), layer), fit === 'clip' ? 'A' : 'B'), h('span', { class: 'cap', text: fit === 'clip' ? 'A 比率を保つ' : 'B 爪に合わせる' })]));
     });
     return group('適用前に見比べる', [h('div', { class: 'compare3' }, cells),
       note('A は柄の縦横比を保ち、はみ出した部分を爪の輪郭で切ります。B は柄全体を爪の長さ・幅に合わせて変形します。タップで適用します。')]);
@@ -1021,7 +1131,7 @@
         kids.push(h('p', { class: 'note', text: '柄の色' }));
         kids.push(swatches(d.art.fg, (c) => { d.art.fg = c; commit(); markDirty(); renderPanel(); }));
       }
-      panel.appendChild(group('位置・大きさの調整', kids.concat(tfControls(d, d.art.kind === 'image'))));
+      panel.appendChild(group('位置・大きさの調整', kids.concat(tfControls(d, d.art.kind === 'image', n.shape))));
     }
     if (d) {
       panel.appendChild(copyTargets((id) => {
@@ -1463,22 +1573,20 @@
       $('guideLabel').textContent = ui.guides ? '表示' : '非表示';
       requestDraw();
     });
-    $('toolEdit').addEventListener('click', () => { ui.tool = 'edit'; renderTabs(); requestDraw(); });
-    $('toolPan').addEventListener('click', () => { ui.tool = 'pan'; ui.place = 'point'; renderTabs(); renderPanel(); requestDraw(); });
+    $('toolEdit').addEventListener('click', () => {
+      if (editingContour()) ui.tool = 'edit'; else ui.artTool = 'art';
+      renderTabs(); requestDraw();
+    });
+    $('toolPan').addEventListener('click', () => {
+      if (editingContour()) { ui.tool = 'pan'; ui.place = 'point'; renderPanel(); } else ui.artTool = 'pan';
+      renderTabs(); requestDraw();
+    });
     const center = () => { const s = stageSize(); return { x: s.w / 2, y: s.h / 2 }; };
     $('zoomIn').addEventListener('click', () => zoomAt(center(), 1.4));
     $('zoomOut').addEventListener('click', () => zoomAt(center(), 1 / 1.4));
     $('zoomFit').addEventListener('click', () => { fitView(viewKey()); requestDraw(); });
     $('zoomNail').addEventListener('click', () => {
-      const f = U.nailFrame(state.nails[ui.finger].shape);
-      if (!f) { toast(fname(ui.finger) + 'の輪郭がまだありません'); return; }
-      const X = viewXf();
-      const bw = f.bounds.x1 - f.bounds.x0, bh = f.bounds.y1 - f.bounds.y0;
-      const st = stageSize();
-      const v = ui.views.photo;
-      v.zoom = U.clamp(Math.min(st.w / bw, st.h / bh) * 0.45 / X.fit, 0.5, 14);
-      v.cx = (f.bounds.x0 + f.bounds.x1) / 2; v.cy = (f.bounds.y0 + f.bounds.y1) / 2;
-      requestDraw();
+      if (!zoomToNail()) toast(fname(ui.finger) + 'の輪郭がまだありません');
     });
 
     const onFile = (id, fn) => $(id).addEventListener('change', (e) => {

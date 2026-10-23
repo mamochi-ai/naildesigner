@@ -184,14 +184,18 @@
   let sample = null;
   function sampleFinger() {
     if (sample) return sample;
+    const K = 2.5; // 一覧の見本を高解像度で描く
     const W = 150, H = 190;
-    const c = U.makeCanvas(W, H);
+    const c = U.makeCanvas(W * K, H * K);
     const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.scale(K, K);
     ctx.fillStyle = '#f2ece5'; ctx.fillRect(0, 0, W, H);
     drawFinger(ctx, { x: 75, y: 240 }, { x: 75, y: 70 }, 100);
     const dir = { x: 0, y: -1 };
     drawNail(ctx, 75, 60, dir, 72, 92);
-    sample = { canvas: c, shape: sampleShape(75, 60, dir, 72, 92, 12) };
+    const sh = sampleShape(75, 60, dir, 72, 92, 12);
+    const sc = (p) => ({ x: p.x * K, y: p.y * K });
+    sample = { canvas: c, shape: { points: sh.points.map(sc), base: sc(sh.base), tip: sc(sh.tip), smooth: sh.smooth } };
     return sample;
   }
 
