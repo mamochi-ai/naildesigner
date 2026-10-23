@@ -254,6 +254,7 @@
       strokeShape(ctx, sp, false, 'rgba(255,255,255,0.95)', '#d6336c', 4, 2, [5, 4]);
     }
     const f = U.nailFrame(shape);
+    if (f && f.extOn) strokeShape(ctx, f.contour.map((p) => toScreen(p, X)), true, 'rgba(255,255,255,0.9)', '#7a4fb3', 3.5, 1.6, [7, 5]);
     if (f) {
       const b = toScreen(shape.base || f.base, X), t = toScreen(shape.tip || f.tip, X);
       ctx.save();
@@ -339,6 +340,7 @@
       if (ui.tool === 'pan') msg = '1本指で写真を動かせます（点を置くには「点を編集」）';
       else if (ui.place === 'base') msg = '根元（甘皮側）の位置をタップしてください';
       else if (ui.place === 'tip') msg = '先端の位置をタップしてください';
+      else if (needsZoomFirst()) msg = who + 'をタップすると拡大します。拡大したら、ふちに点を置きます';
       else if (sh && sh.points.length < 3) msg = who + 'のふちをタップして点を置きます（目安6〜12点）';
       else if (sh && sh.guessed) msg = '根元・先端を仮置きしました。違う場合は「向きを反転」か印をドラッグ';
     }
@@ -456,6 +458,12 @@
         if (h.kind === 'pt') { ui.selPt = h.i; renderPanelSoft(); }
         showLoupe(p, h.p);
       } else {
+        if (needsZoomFirst()) {
+          const v = ui.views[viewKey()];
+          gesture = Object.assign(start, { type: 'zoomtap', cx0: v.cx, cy0: v.cy, moved: false });
+          requestDraw();
+          return;
+        }
         gesture = Object.assign(start, { type: 'place', cur: p });
         showLoupe(p, toImage(p, X));
       }
@@ -514,7 +522,7 @@
       tf.x = U.clamp(gesture.tf0.x + sh.x, -1.5, 1.5);
       tf.y = U.clamp(gesture.tf0.y + sh.y, -1.5, 1.5);
       markDirty();
-    } else if (gesture.type === 'pan') {
+    } else if (gesture.type === 'pan' || gesture.type === 'zoomtap') {
       const v = ui.views[viewKey()];
       if (U.dist(p, gesture.s) > 6) gesture.moved = true;
       v.cx = gesture.cx0 - (p.x - gesture.s.x) / X.scale;
@@ -558,7 +566,9 @@
     hideLoupe();
     if (e.type === 'pointercancel') { cancelSingleFrom(g); requestDraw(); return; }
     const X = viewXf();
-    if (g.type === 'place') {
+    if (g.type === 'zoomtap') {
+      if (!g.moved) zoomAtImage(toImage(g.s, X));
+    } else if (g.type === 'place') {
       addAt(toImage(g.cur, X));
     } else if (g.type === 'drag') {
       if (g.moved) { commit(); renderPanelSoft(); }
@@ -601,6 +611,21 @@
     requestDraw();
   }
 
+  // 爪がまだ小さく見えているうちは、最初のタップで拡大してから点を置く
+  function needsZoomFirst() {
+    if (!editingContour() || ui.tool !== 'edit' || ui.place !== 'point') return false;
+    const t = target();
+    if (!t || t.shape.points.length) return false;
+    const st = stageSize();
+    return Math.min(st.w, st.h) / viewXf().scale > 700;
+  }
+  function zoomAtImage(ip) {
+    const X = viewXf(), st = stageSize();
+    const v = ui.views[viewKey()];
+    v.zoom = U.clamp(Math.max(v.zoom * 1.5, (Math.min(st.w, st.h) / 320) / X.fit), 0.5, 14);
+    v.cx = ip.x; v.cy = ip.y;
+    requestDraw();
+  }
   function zoomToNail() {
     const f = U.nailFrame(state.nails[ui.finger].shape);
     if (!f) return false;
@@ -737,6 +762,10 @@
   }
   function selectFinger(id) {
     ui.finger = id; ui.selPt = -1; ui.selDeco = -1; ui.place = 'point';
+    // 輪郭づくりでは：輪郭がある指はその爪へ、まだの指は全体表示に戻して「タップで拡大」から始める
+    if (ui.tab === 'contour' && state.photo) {
+      if (state.nails[id].shape.points.length >= 3) zoomToNail(); else fitView('photo');
+    }
     renderFingers(); renderPanel(); requestDraw();
   }
 
@@ -828,6 +857,8 @@
       return;
     }
     panel.appendChild(group('点を置く', contourControls(n.shape, false)));
+    if (n.shape.points.length >= 3) panel.appendChild(extGroup(n));
+    panel.appendChild(rotateGroup());
     panel.appendChild(h('div', { class: 'row' }, [btn('爪が見えにくい？ 撮り方ガイド', openGuide, 'ghost')]));
     panel.appendChild(h('div', { class: 'row' }, [
       btn('この指はスキップ', () => { n.skip = true; commit(); markDirty(); renderPanel(); }),
@@ -843,6 +874,33 @@
         btn('単色をすぐ試す（自分で作る）', () => { if (n.shape.points.length >= 3) ensureDesign(ui.finger); commit(); setTab('custom'); }),
       ]));
     }
+  }
+
+  /* つけ爪で長さを出す（爪が短い人向け） */
+  function extGroup(n) {
+    const sh = n.shape;
+    const ext = sh.ext || { on: false, length: 0.35, shape: 'oval' };
+    const kids = [
+      h('label', { class: 'toggle' }, [h('input', {
+        type: 'checkbox', checked: ext.on,
+        onchange: (e) => { sh.ext = Object.assign({ length: 0.35, shape: 'oval' }, sh.ext || {}, { on: e.target.checked }); commit(); markDirty(); renderPanel(); },
+      }), 'つけ爪で長さを出す']),
+    ];
+    if (ext.on) {
+      kids.push(slider('伸ばす長さ', ext.length, 0, 1.5, 0.01, (v) => '+' + Math.round(v * 100) + '%', (v) => (sh.ext.length = v)));
+      kids.push(h('div', { class: 'chips', role: 'group', 'aria-label': '先端の形' }, Object.keys(U.EXT_SHAPES).map((k) => h('button', {
+        type: 'button', class: 'chip', 'aria-pressed': ext.shape === k ? 'true' : 'false',
+        onclick: () => { sh.ext.shape = k; commit(); markDirty(); renderPanel(); },
+      }, U.EXT_SHAPES[k].name))));
+      kids.push(btn('この長さと形をほかの指にもそろえる', () => {
+        const ids = fingersWithContour().filter((id) => id !== ui.finger);
+        ids.forEach((id) => { state.nails[id].shape.ext = U.clone(sh.ext); });
+        commit(); markDirty();
+        toast(ids.length ? ids.map(fname).join('・') + 'にそろえました' : 'ほかに輪郭のある指がありません');
+      }));
+      kids.push(note('長さは自分の爪の長さに対する割合です。伸ばした部分は肌の上に重なるので、不透明度は高めがおすすめです。色や柄を付けると表示されます。'));
+    }
+    return group('長さだし（つけ爪）', kids);
   }
 
   function needContour() {
@@ -877,15 +935,18 @@
     if (src && f && t.fit !== 'stretch') {
       // 参考の爪と自分の爪の大きさが違うときの「ひと押し合わせ」
       const k0 = R.artBaseK(f.W, f.H, src.w, src.h);
-      const fitTo = (k) => {
-        d.tf = Object.assign(M.defaultDesign().tf, { fit: t.fit, flip: t.flip, scale: U.clamp(k / k0, 0.2, 5) });
+      const fitTo = (k, sy) => {
+        d.tf = Object.assign(M.defaultDesign().tf, { fit: t.fit, flip: t.flip, scale: U.clamp(k / k0, 0.2, 5), sy: sy || 1 });
         commit(); markDirty(); renderPanel();
       };
       kids.push(h('div', { class: 'row' }, [
         btn('爪の幅に合わせる', () => fitTo(f.W / src.w)),
         btn('爪の長さに合わせる', () => fitTo(f.H / src.h)),
       ]));
-      kids.push(note('どちらも先端をそろえて置きます。柄が足りない部分は元の爪が見えます。'));
+      kids.push(h('div', { class: 'row' }, [
+        btn('幅と長さの両方に合わせる（伸ばす）', () => fitTo(f.W / src.w, (f.H / src.h) / (f.W / src.w))),
+      ]));
+      kids.push(note('どれも先端をそろえて置きます。「両方に合わせる」は柄を縦に伸び縮みさせます。柄が足りない部分は元の爪が見えます。'));
     }
     if (showFit) {
       kids.push(h('div', { class: 'chips', role: 'group', 'aria-label': '合わせ方' }, [
@@ -899,7 +960,11 @@
     kids.push(slider('位置（縦）', t.y, -0.6, 0.6, 0.01, (v) => Math.round(v * 100), (v) => (t.y = v)));
     kids.push(slider('回転', t.rot, -180, 180, 1, (v) => Math.round(v) + '°', (v) => (t.rot = v)));
     kids.push(slider('大きさ', t.scale, 0.3, 3, 0.01, pct, (v) => (t.scale = v)));
-    kids.push(slider('縦横比', t.aspect, 0.5, 2, 0.01, (v) => v.toFixed(2), (v) => (t.aspect = v)));
+    if (t.aspect && t.aspect !== 1) { t.sy = (t.sy || 1) * t.aspect; t.aspect = 1; } // 旧データの縦横比を縦の伸びに移す
+    if (t.sx == null) t.sx = 1;
+    if (t.sy == null) t.sy = 1;
+    kids.push(slider('横に伸ばす', t.sx, 0.3, 3, 0.01, pct, (v) => (t.sx = v)));
+    kids.push(slider('縦に伸ばす', t.sy, 0.3, 3, 0.01, pct, (v) => (t.sy = v)));
     kids.push(slider('柄の濃さ', d.artOpacity == null ? 1 : d.artOpacity, 0, 1, 0.01, pct, (v) => (d.artOpacity = v)));
     kids.push(h('div', { class: 'row' }, [
       btn(t.flip ? '左右反転：オン' : '左右反転：オフ', () => { t.flip = !t.flip; commit(); markDirty(); renderPanel(); }, '', { 'aria-pressed': t.flip ? 'true' : 'false' }),
@@ -1008,6 +1073,7 @@
     panel.appendChild(h('h2', { text: '参考画像の爪を切り抜く' }));
     panel.appendChild(note('手順：爪のふちに点を置く → 根元と先端を確認 → 「切り抜く」。隠れて見えない部分の模様は補完しません。'));
     panel.appendChild(group('点を置く', contourControls(rd.shape, true)));
+    panel.appendChild(rotateGroup());
     panel.appendChild(h('div', { class: 'row' }, [
       btn('やめる', async () => {
         if (rd.shape.points.length && !(await confirmDialog('切り抜きをやめますか？', '参考画像に置いた点は消えます。「戻す」で元に戻せます。', 'やめる', true))) return;
@@ -1016,6 +1082,33 @@
       btn('切り抜く', makeCutout, 'primary', { disabled: rd.shape.points.length < 3 }),
     ]));
     panel.appendChild(note('元写真の反射や影は、切り抜いた柄に残ります。完全には除去できません。'));
+  }
+
+  /* 写真を90度回転（指先が下や横を向いた写真用）。輪郭の座標も一緒に回す */
+  async function rotateSource(dir) {
+    const isRef = refMode();
+    const src = isRef ? refCanvas : photoCanvas;
+    const meta = isRef ? state.refDraft : state.photo;
+    if (!src || !meta) return;
+    const w = meta.w, hh = meta.h;
+    const c = U.makeCanvas(hh, w);
+    const ctx = c.getContext('2d');
+    if (dir > 0) { ctx.translate(hh, 0); ctx.rotate(Math.PI / 2); } else { ctx.translate(0, w); ctx.rotate(-Math.PI / 2); }
+    ctx.drawImage(src, 0, 0);
+    const assetId = await S.addCanvas(c, 'image/jpeg');
+    const map = (p) => (p ? (dir > 0 ? { x: hh - p.y, y: p.x } : { x: p.y, y: w - p.x }) : p);
+    const mapShape = (sh) => { sh.points = sh.points.map(map); sh.base = map(sh.base); sh.tip = map(sh.tip); };
+    meta.assetId = assetId; meta.w = hh; meta.h = w;
+    if (isRef) { mapShape(state.refDraft.shape); buildRefCanvas(); fitView('ref'); }
+    else { FINGERS.forEach((F) => mapShape(state.nails[F.id].shape)); buildPhotoCanvas(); fitView('photo'); }
+    commit(); markDirty(); renderPanel();
+    toast('写真を' + (dir > 0 ? '右' : '左') + 'に回転しました');
+  }
+  function rotateGroup() {
+    return group('写真の向き', [
+      h('div', { class: 'row' }, [btn('↺ 左に回転', () => rotateSource(-1)), btn('↻ 右に回転', () => rotateSource(1))]),
+      note('指先が下や横を向いている写真は、指先が上になるように回すと、根元・先端が正しく仮置きされます。'),
+    ]);
   }
 
   async function makeCutout() {
@@ -1189,6 +1282,7 @@
       gl.on ? slider('強さ', gl.amount, 0.05, 1, 0.01, pct, (v) => (gl.amount = v)) : null,
     ]));
 
+    panel.appendChild(extGroup(n));
     panel.appendChild(decoGroup(d));
 
     panel.appendChild(copyTargets((id) => { state.nails[id].design = U.clone(d); }, 'この指のデザインをほかの指にもコピー'));

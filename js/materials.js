@@ -14,7 +14,7 @@
       gloss: 0.35, // 追加の光沢
       feather: 1.2, // 縁のなじませ（内側のみ・px）
       art: null, // { kind:'pattern', id, fg } | { kind:'image', assetId, name } | { kind:'cutout', cutoutId }
-      tf: { x: 0, y: 0, rot: 0, scale: 1, aspect: 1, flip: false, fit: 'clip' },
+      tf: { x: 0, y: 0, rot: 0, scale: 1, sx: 1, sy: 1, aspect: 1, flip: false, fit: 'clip' },
       artOpacity: 1,
       french: { on: false, color: '#ffffff', width: 0.28 },
       glitter: { on: false, color: '#d9b26a', amount: 0.5 },

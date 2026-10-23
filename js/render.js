@@ -26,12 +26,13 @@
     return t;
   }
 
-  function makeMask(f, x0, y0, bw, bh, feather) {
+  function makeMask(f, x0, y0, bw, bh, feather, contour) {
+    contour = contour || f.contour;
     const c = U.makeCanvas(bw, bh);
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.translate(-x0, -y0);
     ctx.fillStyle = '#000';
-    U.pathFrom(ctx, f.contour);
+    U.pathFrom(ctx, contour);
     ctx.fill();
     if (feather > 0.05) {
       ctx.globalCompositeOperation = 'destination-out';
@@ -40,7 +41,7 @@
       for (let k = 1; k <= n; k++) {
         ctx.globalAlpha = 0.33;
         ctx.lineWidth = (2 * feather * k) / n;
-        U.pathFrom(ctx, f.contour);
+        U.pathFrom(ctx, contour);
         ctx.stroke();
       }
     }
@@ -92,7 +93,7 @@
     if (a.kind === 'pattern') {
       p.translate(W / 2 + t.x * W, H / 2 + t.y * H);
       p.rotate((t.rot * Math.PI) / 180);
-      p.scale(t.scale * (t.flip ? -1 : 1), t.scale * t.aspect);
+      p.scale(t.scale * (t.sx || 1) * (t.flip ? -1 : 1), t.scale * (t.sy || 1) * (t.aspect || 1));
       const S = Math.ceil(2.3 * Math.max(W, H));
       const tex = patternTexture(a.id, a.fg || '#ffffff', W, S);
       p.drawImage(tex, -S / 2, -S / 2);
@@ -103,7 +104,7 @@
         const iw = src.w, ih = src.h;
         p.translate(W / 2 + t.x * W, t.y * H);
         p.rotate((t.rot * Math.PI) / 180);
-        p.scale(t.scale * (t.flip ? -1 : 1), t.scale * t.aspect);
+        p.scale(t.scale * (t.sx || 1) * (t.flip ? -1 : 1), t.scale * (t.sy || 1) * (t.aspect || 1));
         if (t.fit === 'stretch') {
           p.drawImage(src.img, -W / 2, 0, W, H);
         } else {
@@ -195,7 +196,9 @@
     if (bw < 3 || bh < 3) return null;
     const skey = JSON.stringify(shape);
     const mask = makeMask(f, x0, y0, bw, bh, design.feather || 0);
-    const lum = lumMap(env, skey, x0, y0, bw, bh, mask);
+    // つけ爪部分は肌や背景の上なので、元写真の明暗は自分の爪の範囲だけに使う
+    const nat = f.extOn ? makeMask(f, x0, y0, bw, bh, 3, f.natural) : null;
+    const lum = lumMap(env, skey, x0, y0, bw, bh, nat || mask);
 
     const c = U.makeCanvas(bw, bh);
     const p = c.getContext('2d');
@@ -214,7 +217,9 @@
       const m = mask[i];
       const j = i * 4;
       if (!m || !px[j + 3]) { px[j + 3] = 0; continue; }
-      let fac = 1 + sa * (lum[i] - 1);
+      let lf = lum[i];
+      if (nat) lf = 1 + (lf - 1) * (nat[i] / 255);
+      let fac = 1 + sa * (lf - 1);
       fac = fac < 0.25 ? 0.25 : fac > 1.8 ? 1.8 : fac;
       for (let ch = 0; ch < 3; ch++) {
         const v = px[j + ch];
@@ -281,9 +286,12 @@
     return c;
   }
 
-  function describe(design, state) {
+  function describe(design, state, shape) {
     if (!design) return ['未設定'];
     const out = [];
+    if (shape && shape.ext && shape.ext.on) {
+      out.push('長さだし: ' + (U.EXT_SHAPES[shape.ext.shape] || U.EXT_SHAPES.oval).name + ' +' + Math.round(shape.ext.length * 100) + '%');
+    }
     if (design.presetId) {
       const p = M.PRESETS.find((x) => x.id === design.presetId);
       if (p) out.push('デザイン: ' + p.name);
@@ -374,7 +382,7 @@
         ctx.font = '20px ' + FONT;
         ctx.fillStyle = '#6b5c60';
         let ly = y + 380;
-        describe(o.n.design, state).forEach((line) => {
+        describe(o.n.design, state, o.n.shape).forEach((line) => {
           wrapText(ctx, line, cardW - 32).forEach((l) => { if (ly < y + cardH - 12) { ctx.fillText(l, x + 16, ly); ly += 28; } });
         });
       });

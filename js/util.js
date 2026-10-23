@@ -91,9 +91,67 @@
   }
 
   /* 爪の座標系。u=幅方向（右）、v=根元→先端方向 */
+  /* つけ爪（長さだし）の先端形状。p は角の丸さ、cap は先端カーブの長さ（爪幅の半分に対する倍率） */
+  const EXT_SHAPES = {
+    round: { name: 'ラウンド', p: 2, cap: 1.0 },
+    oval: { name: 'オーバル', p: 2, cap: 1.6 },
+    square: { name: 'スクエア', p: 8, cap: 0.45 },
+    squareoval: { name: 'スクエアオフ', p: 3.2, cap: 0.75 },
+    almond: { name: 'アーモンド', p: 1.5, cap: 2.3 },
+    point: { name: 'ポイント', p: 1, cap: 3.2 },
+  };
+
+  // 自分の爪の根元〜側面はそのまま使い、先端側だけを指定の長さと形に作り直す
+  function extendContour(nat, base, u, v, ext) {
+    const loc = nat.map((p) => {
+      const dx = p.x - base.x, dy = p.y - base.y;
+      return { u: dx * u.x + dy * u.y, v: dx * v.x + dy * v.y };
+    });
+    let vmin = Infinity, vmax = -Infinity;
+    loc.forEach((q) => { vmin = Math.min(vmin, q.v); vmax = Math.max(vmax, q.v); });
+    const L = vmax - vmin;
+    const cutV = vmin + 0.72 * L;
+    const span = (t) => {
+      let l = Infinity, r = -Infinity;
+      for (let i = 0; i < loc.length; i++) {
+        const a = loc[i], b = loc[(i + 1) % loc.length];
+        if ((a.v - t) * (b.v - t) <= 0 && a.v !== b.v) {
+          const x = a.u + ((t - a.v) / (b.v - a.v)) * (b.u - a.u);
+          l = Math.min(l, x); r = Math.max(r, x);
+        }
+      }
+      return l <= r ? { l, r } : null;
+    };
+    const left = [], right = [];
+    const N = 28;
+    for (let i = 0; i <= N; i++) {
+      const t = vmin + (cutV - vmin) * (0.02 + (0.98 * i) / N);
+      const sp = span(t);
+      if (sp) { left.push({ u: sp.l, v: t }); right.push({ u: sp.r, v: t }); }
+    }
+    if (left.length < 2) return nat;
+    const top = left.length - 1;
+    const hw = (right[top].u - left[top].u) / 2, cu = (right[top].u + left[top].u) / 2;
+    const P = EXT_SHAPES[ext.shape] || EXT_SHAPES.oval;
+    const tipV = vmax + Math.max(0, ext.length) * L;
+    const zone = Math.max(1, tipV - cutV);
+    const sc = 1 - Math.min(zone, P.cap * hw) / zone;
+    const eL = [], eR = [];
+    const M = 32;
+    for (let i = 1; i <= M; i++) {
+      const s2 = i / M, y = cutV + zone * s2;
+      const q = s2 <= sc ? 0 : (s2 - sc) / (1 - sc);
+      const g = q <= 0 ? 1 : Math.pow(Math.max(0, 1 - Math.pow(q, P.p)), 1 / P.p);
+      eL.push({ u: cu - hw * g, v: y }); eR.push({ u: cu + hw * g, v: y });
+    }
+    const ring = left.concat(eL, eR.reverse(), right.reverse());
+    return ring.map((q) => ({ x: base.x + q.u * u.x + q.v * v.x, y: base.y + q.u * u.y + q.v * v.y }));
+  }
+
   function nailFrame(shape) {
     if (!shape || !shape.points || shape.points.length < 3) return null;
-    const contour = smoothContour(shape.points, shape.smooth == null ? 0.6 : shape.smooth, 10);
+    const natural = smoothContour(shape.points, shape.smooth == null ? 0.6 : shape.smooth, 10);
+    let contour = natural;
     let base = shape.base, tip = shape.tip;
     if (!base || !tip) { const g = guessAxis(shape.points); base = base || g.base; tip = tip || g.tip; }
     let vx = tip.x - base.x, vy = tip.y - base.y;
@@ -101,6 +159,8 @@
     vx /= L; vy /= L;
     const u = { x: -vy, y: vx };
     const v = { x: vx, y: vy };
+    const extOn = !!(shape.ext && shape.ext.on);
+    if (extOn) contour = extendContour(natural, base, u, v, shape.ext);
     let umin = Infinity, umax = -Infinity, vmin = Infinity, vmax = -Infinity;
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     contour.forEach((p) => {
@@ -115,7 +175,7 @@
     const cu = (umin + umax) / 2, cv = (vmin + vmax) / 2;
     const C = { x: base.x + u.x * cu + v.x * cv, y: base.y + u.y * cu + v.y * cv };
     return {
-      contour, u, v, W, H, C, base, tip,
+      contour, natural, extOn, u, v, W, H, C, base, tip,
       bounds: { x0: bx0, y0: by0, x1: bx1, y1: by1 },
     };
   }
@@ -193,7 +253,7 @@
   }
 
   ND.util = {
-    FINGERS, uid, clamp, clone, dist, rng, smoothContour, insertIndex, guessAxis, nailFrame,
+    FINGERS, EXT_SHAPES, uid, clamp, clone, dist, rng, smoothContour, insertIndex, guessAxis, nailFrame,
     localToImage, imageToUpright, pointInPoly, pathFrom, makeCanvas, hexToRgb, rgbToHex, shade,
     canvasToBlob, blobToDataURL, dataURLToBlob,
   };
