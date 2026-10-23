@@ -213,6 +213,9 @@
     const id = p.getImageData(0, 0, bw, bh);
     const px = id.data;
     const sa = design.shadeAmt, op = design.opacity;
+    // 立体感：爪は横方向に丸いので、両側と根元側をわずかに暗く、中央をわずかに明るくする
+    const cvAmt = design.curve == null ? 0.5 : design.curve;
+    const hwI = 2 / f.W, hhI = 2 / f.H, Cx = f.C.x - x0 - 0.5, Cy = f.C.y - y0 - 0.5;
     for (let i = 0, n = bw * bh; i < n; i++) {
       const m = mask[i];
       const j = i * 4;
@@ -221,6 +224,13 @@
       if (nat) lf = 1 + (lf - 1) * (nat[i] / 255);
       let fac = 1 + sa * (lf - 1);
       fac = fac < 0.25 ? 0.25 : fac > 1.8 ? 1.8 : fac;
+      if (cvAmt > 0) {
+        const dx = (i % bw) - Cx, dy = ((i / bw) | 0) - Cy;
+        let lu = Math.abs((dx * f.u.x + dy * f.u.y) * hwI); if (lu > 1) lu = 1;
+        const lv = (dx * f.v.x + dy * f.v.y) * hhI;
+        const back = lv < 0 ? Math.min(1, -lv) : 0;
+        fac *= 1 + cvAmt * (0.07 * (1 - lu * lu) - 0.45 * Math.pow(lu, 2.4) - 0.14 * back * back * back);
+      }
       for (let ch = 0; ch < 3; ch++) {
         const v = px[j + ch];
         px[j + ch] = fac < 1 ? v * fac : v + (255 - v) * (fac - 1) * 0.85;

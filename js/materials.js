@@ -12,6 +12,7 @@
       opacity: 0.92, // 不透明度（下げると透明感が出て元の爪が透ける）
       shadeAmt: 0.65, // 元写真の明暗をどれだけ反映するか
       gloss: 0.35, // 追加の光沢
+      curve: 0.5, // 立体感（爪の丸みに合わせて両側を少し暗くする）
       feather: 1.2, // 縁のなじませ（内側のみ・px）
       art: null, // { kind:'pattern', id, fg } | { kind:'image', assetId, name } | { kind:'cutout', cutoutId }
       tf: { x: 0, y: 0, rot: 0, scale: 1, sx: 1, sy: 1, aspect: 1, flip: false, fit: 'clip' },

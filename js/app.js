@@ -337,7 +337,8 @@
       const t = target();
       const sh = t && t.shape;
       const who = refMode() ? '参考画像の爪' : fname(ui.finger) + 'の爪';
-      if (ui.tool === 'pan') msg = '1本指で写真を動かせます（点を置くには「点を編集」）';
+      if (needsZoomFirst()) msg = '① ' + who + 'をタップして拡大（2本指でも可）→ ② ふちに点を置く';
+      else if (ui.tool === 'pan') msg = '1本指で写真を動かせます（点を置くには「点を編集」）';
       else if (ui.place === 'base') msg = '根元（甘皮側）の位置をタップしてください';
       else if (ui.place === 'tip') msg = '先端の位置をタップしてください';
       else if (needsZoomFirst()) msg = who + 'をタップすると拡大します。拡大したら、ふちに点を置きます';
@@ -553,6 +554,11 @@
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
     if (!gesture) return;
+    if (gesture.type === 'pinch' && pointers.size < 2) {
+      // 2本指で十分に拡大したら、点を置く操作に切り替える
+      const t = target();
+      if (editingContour() && ui.tool === 'pan' && t && !t.shape.points.length && !needsZoomFirst()) switchToEdit();
+    }
     if (gesture.type === 'pinch' || gesture.type === 'artpinch') {
       if (gesture.type === 'artpinch') { commit(); renderPanelSoft(); markDirty(); }
       if (pointers.size === 0) gesture = null;
@@ -567,7 +573,7 @@
     if (e.type === 'pointercancel') { cancelSingleFrom(g); requestDraw(); return; }
     const X = viewXf();
     if (g.type === 'zoomtap') {
-      if (!g.moved) zoomAtImage(toImage(g.s, X));
+      if (!g.moved) { zoomAtImage(toImage(g.s, X)); switchToEdit(); }
     } else if (g.type === 'place') {
       addAt(toImage(g.cur, X));
     } else if (g.type === 'drag') {
@@ -575,7 +581,10 @@
       requestDraw();
     } else if (g.type === 'pan' || g.type === 'art') {
       if (g.type === 'art' && g.moved) { commit(); renderPanelSoft(); markDirty(); }
-      if (!g.moved && performance.now() - g.t < 500 && !refMode()) tapSelect(toImage(g.s, X));
+      if (!g.moved && g.type === 'pan' && needsZoomFirst()) {
+        zoomAtImage(toImage(g.s, X));
+        switchToEdit();
+      } else if (!g.moved && performance.now() - g.t < 500 && !refMode()) tapSelect(toImage(g.s, X));
     }
     requestDraw();
   }
@@ -613,11 +622,19 @@
 
   // 爪がまだ小さく見えているうちは、最初のタップで拡大してから点を置く
   function needsZoomFirst() {
-    if (!editingContour() || ui.tool !== 'edit' || ui.place !== 'point') return false;
+    if (!editingContour() || ui.place !== 'point') return false;
     const t = target();
     if (!t || t.shape.points.length) return false;
     const st = stageSize();
     return Math.min(st.w, st.h) / viewXf().scale > 700;
+  }
+  function switchToEdit() {
+    if (ui.tool !== 'edit') {
+      ui.tool = 'edit';
+      renderTabs();
+      toast('拡大しました。爪のふちをタップして点を置いてください');
+    }
+    requestDraw();
   }
   function zoomAtImage(ip) {
     const X = viewXf(), st = stageSize();
@@ -764,7 +781,8 @@
     ui.finger = id; ui.selPt = -1; ui.selDeco = -1; ui.place = 'point';
     // 輪郭づくりでは：輪郭がある指はその爪へ、まだの指は全体表示に戻して「タップで拡大」から始める
     if (ui.tab === 'contour' && state.photo) {
-      if (state.nails[id].shape.points.length >= 3) zoomToNail(); else fitView('photo');
+      if (state.nails[id].shape.points.length >= 3) zoomToNail();
+      else { fitView('photo'); ui.tool = 'pan'; }
     }
     renderFingers(); renderPanel(); requestDraw();
   }
@@ -1022,6 +1040,7 @@
     }
     if (n.design && n.design.art && n.design.art.kind === 'cutout') {
       panel.appendChild(group('位置・大きさの調整', tfControls(n.design, true, n.shape)));
+      panel.appendChild(finishGroup(n.design, '立体感・光沢（のっぺり見えるとき）', true));
       panel.appendChild(copyTargets((id) => {
         const d = ensureDesign(id);
         d.art = U.clone(n.design.art); d.tf = U.clone(n.design.tf);
@@ -1043,7 +1062,7 @@
       const d = n.design ? U.clone(n.design) : M.defaultDesign();
       d.art = { kind: 'cutout', cutoutId: cut.id };
       d.tf = Object.assign(M.defaultDesign().tf, { fit });
-      if (!n.design || !(n.design.art && n.design.art.kind === 'cutout')) { d.color = null; d.shadeAmt = 0.2; d.gloss = 0; d.french.on = false; d.glitter.on = false; }
+      if (!n.design || !(n.design.art && n.design.art.kind === 'cutout')) { d.color = null; d.shadeAmt = 0.4; d.gloss = 0; d.curve = 0.45; d.french.on = false; d.glitter.on = false; }
       d.presetId = null;
       return d;
     };
@@ -1263,6 +1282,7 @@
       slider('不透明度', d.opacity, 0.1, 1, 0.01, pct, (v) => (d.opacity = v)),
       note('下げると透明感が出ます。元の爪の色・模様も透けて見えます。'),
       slider('明暗の反映', d.shadeAmt, 0, 1, 0.01, pct, (v) => (d.shadeAmt = v)),
+      slider('立体感', d.curve == null ? 0.5 : d.curve, 0, 1, 0.01, pct, (v) => (d.curve = v)),
       slider('光沢', d.gloss, 0, 1, 0.01, pct, (v) => (d.gloss = v)),
       slider('縁のなじませ', d.feather, 0, 3, 0.1, (v) => v.toFixed(1) + 'px', (v) => (d.feather = v)),
       note('縁のなじませは輪郭の内側だけで行い、肌には色が付きません。'),
@@ -1292,6 +1312,18 @@
         n.design = null; ui.selDeco = -1; commit(); markDirty(); renderPanel();
       }, 'danger'),
     ]));
+  }
+
+  function finishGroup(d, title, isPhoto) {
+    return group(title, [
+      slider('立体感', d.curve == null ? 0.5 : d.curve, 0, 1, 0.01, pct, (v) => (d.curve = v)),
+      slider('元の爪の明暗', d.shadeAmt, 0, 1, 0.01, pct, (v) => (d.shadeAmt = v)),
+      slider('光沢を足す', d.gloss, 0, 1, 0.01, pct, (v) => (d.gloss = v)),
+      slider('不透明度', d.opacity, 0.1, 1, 0.01, pct, (v) => (d.opacity = v)),
+      note(isPhoto
+        ? '立体感は爪の丸みに合わせて両側を少し暗くします。参考写真の光沢がすでにある場合、光沢を足すと二重に見えることがあります。'
+        : '立体感は爪の丸みに合わせて両側を少し暗くします。'),
+    ]);
   }
 
   function decoGroup(d) {
