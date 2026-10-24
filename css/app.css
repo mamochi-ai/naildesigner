@@ -100,6 +100,7 @@ button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; c
 .seg-btn { min-height: 40px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; font-size: 14px; }
 .seg-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 .seg[hidden] { display: none; }
+.zoom-tools { display: flex; gap: 6px; align-items: center; }
 .round-btn {
   min-width: var(--tap); height: var(--tap); border-radius: 22px; border: 0; background: var(--surface);
   box-shadow: 0 1px 4px rgba(58,46,49,0.18); font-size: 18px;
@@ -298,7 +299,9 @@ textarea { width: 100%; box-sizing: border-box; min-height: 96px; border: 1px so
 }
 @media (max-width: 600px) {
   .stage-tools { gap: 4px; left: 6px; right: 6px; bottom: 6px; flex-wrap: nowrap; }
-  .seg-btn { padding: 0 8px; font-size: 13px; }
+  .seg-btn { padding: 0 7px; font-size: 12.5px; }
+  /* 狭い画面では拡大ボタンを右端に縦に並べ、下の行を操作の切り替えに使う */
+  .zoom-tools { position: absolute; right: 0; bottom: 50px; flex-direction: column; align-items: flex-end; gap: 4px; }
   .round-btn { min-width: 40px; height: 40px; }
   .round-btn.wide { padding: 0 8px; font-size: 12px; }
 }

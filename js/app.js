@@ -19,7 +19,7 @@
 
   // 編集状態（履歴に含めない表示上の状態）
   const ui = {
-    tab: 'contour', finger: 'index', tool: 'pan', artTool: 'pan', place: 'point', selPt: -1, selDeco: -1,
+    tab: 'contour', finger: 'index', tool: 'pan', artTool: 'pan', fix: false, place: 'point', selPt: -1, selDeco: -1,
     compare: false, guides: true, pendingCut: null, allTargets: {},
     views: { photo: { zoom: 1, cx: 0, cy: 0 }, ref: { zoom: 1, cx: 0, cy: 0 } },
     saveStatus: '', lastSaved: null, idbOK: true,
@@ -136,7 +136,15 @@
 
   /* ================= 編集対象 ================= */
   const refMode = () => ui.tab === 'photo' && !!state.refDraft && !!refCanvas;
-  const editingContour = () => ui.tab === 'contour' || refMode();
+  // 柄を付けたあとの画面でも「輪郭を直す」で輪郭を編集できる
+  function fixable() {
+    if (refMode() || ui.compare || !state.photo) return false;
+    if (!['photo', 'design', 'custom'].includes(ui.tab)) return false;
+    const n = state.nails[ui.finger];
+    return !n.skip && n.shape.points.length >= 3;
+  }
+  const contourTab = () => ui.tab === 'contour' || refMode();
+  const editingContour = () => contourTab() || (ui.fix && fixable());
   // 選択中の爪に、指で動かせる柄（写真柄・素材・柄）があるか
   function artEditable() {
     if (refMode() || ui.compare || !state.photo) return false;
@@ -298,7 +306,7 @@
       if (f) strokeShape(ctx, f.contour.map((p) => toScreen(p, X)), true, 'rgba(255,255,255,0.95)', '#d6336c', 4, 2);
       return;
     }
-    const editing = ui.tab === 'contour';
+    const editing = editingContour();
     FINGERS.forEach((F) => {
       const n = state.nails[F.id];
       const sel = F.id === ui.finger;
@@ -337,8 +345,9 @@
       const t = target();
       const sh = t && t.shape;
       const who = refMode() ? '参考画像の爪' : fname(ui.finger) + 'の爪';
-      if (needsZoomFirst() || (ui.tool === 'pan' && sh && !sh.points.length)) msg = '① ' + who + 'をタップして拡大（2本指でも可）→ ② ふちに点を置く';
-      else if (ui.tool === 'pan') msg = '1本指で写真を動かせます（点を置くには「点を編集」）';
+      if (!contourTab()) msg = '点をドラッグして輪郭を直せます（柄も一緒に合わせ直されます）';
+      else if (needsZoomFirst() || (ui.tool === 'pan' && sh && !sh.points.length)) msg = '① ' + who + 'をタップして拡大（2本指でも可）→ ② ふちに点を置く';
+      else if (ui.tool === 'pan') msg = '点はドラッグで動かせます。点を増やすには「点を編集」';
       else if (ui.place === 'base') msg = '根元（甘皮側）の位置をタップしてください';
       else if (ui.place === 'tip') msg = '先端の位置をタップしてください';
       else if (needsZoomFirst()) msg = who + 'をタップすると拡大します。拡大したら、ふちに点を置きます';
@@ -451,8 +460,10 @@
     }
     if (pointers.size > 2) return;
     const start = { s: p, t: performance.now() };
-    if (editingContour() && ui.tool === 'edit') {
-      const h = ui.place === 'point' ? hitHandle(p, X) : null;
+    const handle = editingContour() && ui.place === 'point' ? hitHandle(p, X) : null;
+    if (editingContour() && (ui.tool === 'edit' || handle)) {
+      // 点・根元・先端の印は、「写真を動かす」中でもそのままドラッグで動かせる
+      const h = handle;
       if (h) {
         const sh = target().shape;
         gesture = Object.assign(start, { type: 'drag', h, orig: U.clone(h.p), before: JSON.stringify(sh), moved: false });
@@ -790,7 +801,7 @@
       if (state.nails[id].shape.points.length >= 3) zoomToNail(); else fitView('photo');
     }
     // 指を替えたら、まず「写真を動かす」から（誤って点や柄が動かないように）
-    ui.tool = 'pan'; ui.artTool = 'pan';
+    ui.tool = 'pan'; ui.artTool = 'pan'; ui.fix = false;
     renderFingers(); renderPanel(); requestDraw();
   }
 
@@ -801,17 +812,20 @@
     document.querySelectorAll('#tabbar button').forEach((b) => {
       b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false');
     });
-    const contour = editingContour(), art = !contour && artEditable();
-    document.querySelector('.stage-tools .seg').hidden = !(contour || art);
-    $('toolEdit').textContent = contour ? '点を編集' : '柄を動かす';
-    const editOn = contour ? ui.tool === 'edit' : ui.artTool === 'art';
+    const ct = contourTab(), design = !ct && fixable();
+    document.querySelector('.stage-tools .seg').hidden = !(ct || design);
+    $('toolEdit').textContent = ct ? '点を編集' : '柄を動かす';
+    $('toolEdit').hidden = !ct && !artEditable();
+    $('toolFix').hidden = !design;
+    const editOn = ct ? ui.tool === 'edit' : (!ui.fix && ui.artTool === 'art');
     $('toolEdit').setAttribute('aria-pressed', editOn ? 'true' : 'false');
-    $('toolPan').setAttribute('aria-pressed', editOn ? 'false' : 'true');
+    $('toolFix').setAttribute('aria-pressed', !ct && ui.fix ? 'true' : 'false');
+    $('toolPan').setAttribute('aria-pressed', editOn || (!ct && ui.fix) ? 'false' : 'true');
     $('zoomNail').hidden = refMode();
   }
   function setTab(t) {
     ui.tab = t; ui.selPt = -1; ui.place = 'point'; ui.compare = false;
-    ui.tool = 'pan'; ui.artTool = 'pan';
+    ui.tool = 'pan'; ui.artTool = 'pan'; ui.fix = false;
     syncCompare();
     renderAll();
   }
@@ -1018,9 +1032,18 @@
   }
 
   /* --- ① 写真から --- */
+  function fixGroup() {
+    if (!(ui.fix && fixable())) return;
+    const n = state.nails[ui.finger];
+    panel.appendChild(group(fname(ui.finger) + 'の輪郭を直す', contourControls(n.shape, false).concat([
+      btn('輪郭の調整を終える', () => { ui.fix = false; ui.tool = 'pan'; renderTabs(); renderPanel(); requestDraw(); }, 'primary'),
+    ])));
+  }
+
   function panelPhoto() {
     if (state.refDraft) return panelRefEdit();
     panel.appendChild(editingLabel());
+    fixGroup();
     panel.appendChild(group('参考画像から爪1本を切り抜く', [
       note('参考にしたいネイル写真を選び、爪1本の輪郭と根元・先端を指定して切り抜きます。'),
       h('div', { class: 'row' }, [
@@ -1237,6 +1260,7 @@
 
   function panelDesign() {
     panel.appendChild(editingLabel());
+    fixGroup();
     const grid = h('div', { class: 'thumbs' });
     const n = state.nails[ui.finger];
     M.PRESETS.forEach((p) => {
@@ -1301,6 +1325,7 @@
   function panelCustom() {
     panel.appendChild(editingLabel());
     if (needContour()) return;
+    fixGroup();
     const n = state.nails[ui.finger];
     const d = ensureDesign(ui.finger);
     if (JSON.stringify(state) !== hist.last) { commit(); markDirty(); }
@@ -1518,7 +1543,7 @@
       state.photo = { assetId: r.id, w: r.w, h: r.h, demo: false };
       buildPhotoCanvas();
       fitView('photo');
-      ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null; ui.tool = 'pan'; ui.artTool = 'pan';
+      ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null; ui.tool = 'pan'; ui.artTool = 'pan'; ui.fix = false;
       commit();
       hideStart();
       renderAll();
@@ -1538,7 +1563,7 @@
     state.nails.middle.design = M.applyPreset(null, M.PRESETS.find((p) => p.id === 'flowers'));
     buildPhotoCanvas();
     fitView('photo');
-    ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null; ui.tool = 'pan'; ui.artTool = 'pan';
+    ui.tab = 'contour'; ui.finger = 'thumb'; ui.selPt = -1; ui.pendingCut = null; ui.tool = 'pan'; ui.artTool = 'pan'; ui.fix = false;
     commit();
     hideStart();
     renderAll();
@@ -1740,12 +1765,20 @@
       requestDraw();
     });
     $('toolEdit').addEventListener('click', () => {
-      if (editingContour()) ui.tool = 'edit'; else ui.artTool = 'art';
-      renderTabs(); requestDraw();
+      if (contourTab()) ui.tool = 'edit';
+      else { ui.fix = false; ui.artTool = 'art'; ui.tool = 'pan'; }
+      renderTabs(); renderPanel(); requestDraw();
     });
     $('toolPan').addEventListener('click', () => {
-      if (editingContour()) { ui.tool = 'pan'; ui.place = 'point'; renderPanel(); } else ui.artTool = 'pan';
-      renderTabs(); requestDraw();
+      ui.tool = 'pan'; ui.place = 'point';
+      if (!contourTab()) { ui.fix = false; ui.artTool = 'pan'; }
+      renderTabs(); renderPanel(); requestDraw();
+    });
+    $('toolFix').addEventListener('click', () => {
+      ui.fix = true; ui.artTool = 'pan'; ui.tool = 'edit'; ui.place = 'point'; ui.selPt = -1;
+      zoomToNailIfSmall();
+      renderTabs(); renderPanel(); requestDraw();
+      panel.scrollTop = 0;
     });
     const center = () => { const s = stageSize(); return { x: s.w / 2, y: s.h / 2 }; };
     $('zoomIn').addEventListener('click', () => zoomAt(center(), 1.4));
