@@ -9,7 +9,7 @@
   function defaultDesign() {
     return {
       color: '#e8a3ad',
-      opacity: 0.92, // 不透明度（下げると透明感が出て元の爪が透ける）
+      opacity: 1, // 不透明度（下げると透明感が出て元の爪が透ける）
       shadeAmt: 0.65, // 元写真の明暗をどれだけ反映するか
       gloss: 0.35, // 追加の光沢
       thick: 0.35, // 厚み（ふちの明暗と爪の下の影）
@@ -125,7 +125,7 @@
     const p = U.clone(preset.apply);
     d.art = p.art || null;
     d.color = p.color !== undefined ? p.color : d.color;
-    d.opacity = p.opacity !== undefined ? p.opacity : 0.92;
+    d.opacity = p.opacity !== undefined ? p.opacity : 1;
     d.french = Object.assign(defaultDesign().french, p.french || { on: false });
     d.glitter = Object.assign(defaultDesign().glitter, p.glitter || { on: false });
     d.tf = defaultDesign().tf;

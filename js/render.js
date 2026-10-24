@@ -52,33 +52,33 @@
   }
 
   // 元写真の明るさ（平均を1に正規化）。単色を写真になじませるために使う
-  function lumMap(env, key, x0, y0, bw, bh, mask) {
-    const k = env.photoId + '|' + key + '|' + x0 + ',' + y0 + ',' + bw + ',' + bh;
+  // 元写真の明るさ（平均を1に正規化）。爪の範囲だけを使って強くぼかし、
+  // 大まかな光と影だけを取り出す（元の爪のふちの線や肌のしわが透けて見えないように）
+  function lumMap(env, key, x0, y0, bw, bh, mask, radius) {
+    const R = Math.max(2, radius || 2);
+    const k = env.photoId + '|' + key + '|' + x0 + ',' + y0 + ',' + bw + ',' + bh + '|' + R;
     const hit = lumCache.get(k);
     if (hit) return hit;
     const d = env.photo.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, bw, bh).data;
     const n = bw * bh;
-    let L = new Float32Array(n);
-    for (let i = 0; i < n; i++) L[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
-    const R = 2, tmp = new Float32Array(n);
-    for (let y = 0; y < bh; y++) {
-      for (let x = 0; x < bw; x++) {
-        let s = 0, c = 0;
-        for (let k2 = -R; k2 <= R; k2++) { const xx = x + k2; if (xx >= 0 && xx < bw) { s += L[y * bw + xx]; c++; } }
-        tmp[y * bw + x] = s / c;
-      }
+    const Lm = new Float32Array(n), Wm = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const w = mask[i] > 128 ? 1 : 0;
+      Lm[i] = w * (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
+      Wm[i] = w;
     }
-    for (let y = 0; y < bh; y++) {
-      for (let x = 0; x < bw; x++) {
-        let s = 0, c = 0;
-        for (let k2 = -R; k2 <= R; k2++) { const yy = y + k2; if (yy >= 0 && yy < bh) { s += tmp[yy * bw + x]; c++; } }
-        L[y * bw + x] = s / c;
-      }
-    }
+    const BL = boxBlur(Lm, bw, bh, R), BW = boxBlur(Wm, bw, bh, R);
+    const L = new Float32Array(n);
     let sum = 0, cnt = 0;
-    for (let i = 0; i < n; i++) if (mask[i] > 128) { sum += L[i]; cnt++; }
+    for (let i = 0; i < n; i++) {
+      L[i] = BW[i] > 1e-3 ? BL[i] / BW[i] : 0;
+      if (mask[i] > 128) { sum += L[i]; cnt++; }
+    }
     const mean = cnt ? sum / cnt : 128;
-    for (let i = 0; i < n; i++) L[i] = L[i] / (mean || 1);
+    for (let i = 0; i < n; i++) {
+      const v = BW[i] > 1e-3 ? L[i] / (mean || 1) : 1;
+      L[i] = v < 0.6 ? 0.6 : v > 1.35 ? 1.35 : v;
+    }
     cacheSet(lumCache, k, L, 20);
     return L;
   }
@@ -310,7 +310,7 @@
     const mask = makeMask(f, x0, y0, bw, bh, design.feather || 0);
     // つけ爪部分は肌や背景の上なので、元写真の明暗は自分の爪の範囲だけに使う
     const nat = f.extOn ? makeMask(f, x0, y0, bw, bh, 3, f.natural) : null;
-    const lum = lumMap(env, skey, x0, y0, bw, bh, nat || mask);
+    const lum = lumMap(env, skey, x0, y0, bw, bh, nat || mask, Math.round(f.W * 0.1));
 
     const c = U.makeCanvas(bw, bh);
     const p = c.getContext('2d');

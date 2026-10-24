@@ -1670,7 +1670,12 @@
   function normalizeState(st) {
     const base = emptyState();
     const out = Object.assign(base, st);
-    FINGERS.forEach((f) => { out.nails[f.id] = Object.assign(emptyNail(), (st.nails || {})[f.id] || {}); });
+    FINGERS.forEach((f) => {
+      out.nails[f.id] = Object.assign(emptyNail(), (st.nails || {})[f.id] || {});
+      // 以前の初期値（92%）のままの不透明度は、透けないよう100%にそろえる
+      const d = out.nails[f.id].design;
+      if (d && d.opacity === 0.92) d.opacity = 1;
+    });
     out.cutouts = out.cutouts || []; out.materials = out.materials || [];
     return out;
   }
