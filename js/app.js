@@ -252,7 +252,39 @@
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   }
 
+  // 関節を結ぶガイド線（指の中心線）。爪の先まで延長して描く
+  function drawJointGuide(ctx, X, shape) {
+    const g = shape.guide;
+    if (!g || (!g.j1 && !g.j2)) return;
+    const col = '#2b7a9b';
+    if (g.j1 && g.j2) {
+      const a = toScreen(g.j2, X), b = toScreen(g.j1, X);
+      let dx = b.x - a.x, dy = b.y - a.y; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+      let ext = L * 0.9;
+      const f = U.nailFrame(shape);
+      if (f) f.contour.forEach((p) => { const s = toScreen(p, X); ext = Math.max(ext, (s.x - b.x) * dx + (s.y - b.y) * dy + 30); });
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x + dx * ext, b.y + dy * ext); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([10, 6]);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x + dx * ext, b.y + dy * ext); ctx.stroke();
+      ctx.restore();
+    }
+    [['j1', '第1関節'], ['j2', '第2関節']].forEach(([k, label]) => {
+      if (!g[k]) return;
+      const s = toScreen(g[k], X);
+      ctx.save();
+      ctx.translate(s.x, s.y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+      ctx.fillRect(-8, -8, 16, 16); ctx.strokeRect(-8, -8, 16, 16);
+      ctx.restore();
+      pill(ctx, label, s.x + 44, s.y, 'rgba(43,122,155,0.92)', '#fff');
+    });
+  }
+
   function drawShapeEditor(ctx, X, shape) {
+    drawJointGuide(ctx, X, shape);
     const sp = shape.points.map((p) => toScreen(p, X));
     if (shape.points.length >= 3) {
       const sm = U.smoothContour(shape.points, shape.smooth, 8).map((p) => toScreen(p, X));
@@ -348,6 +380,8 @@
       if (!contourTab()) msg = '点をドラッグして輪郭を直せます（柄も一緒に合わせ直されます）';
       else if (needsZoomFirst() || (ui.tool === 'pan' && sh && !sh.points.length)) msg = '① ' + who + 'をタップして拡大（2本指でも可）→ ② ふちに点を置く';
       else if (ui.tool === 'pan') msg = '点はドラッグで動かせます。点を増やすには「点を編集」';
+      else if (ui.place === 'j1') msg = '第1関節（爪に近い関節）のしわの、指の中央をタップ';
+      else if (ui.place === 'j2') msg = '第2関節（指の真ん中の関節）のしわの、指の中央をタップ';
       else if (ui.place === 'base') msg = '根元（甘皮側）の位置をタップしてください';
       else if (ui.place === 'tip') msg = '先端の位置をタップしてください';
       else if (needsZoomFirst()) msg = who + 'をタップすると拡大します。拡大したら、ふちに点を置きます';
@@ -424,6 +458,7 @@
     const cand = [];
     sh.points.forEach((p, i) => cand.push({ kind: 'pt', i, p }));
     if (f) { cand.push({ kind: 'base', p: sh.base || f.base }); cand.push({ kind: 'tip', p: sh.tip || f.tip }); }
+    if (sh.guide) ['j1', 'j2'].forEach((k) => { if (sh.guide[k]) cand.push({ kind: k, p: sh.guide[k] }); });
     let best = null, bd = 18;
     cand.forEach((c) => {
       const d = U.dist(toScreen(c.p, X), sp);
@@ -546,8 +581,13 @@
       if (U.dist(p, gesture.s) > 3) gesture.moved = true;
       const np = { x: gesture.orig.x + dx, y: gesture.orig.y + dy };
       const sh = target().shape;
-      if (gesture.h.kind === 'pt') sh.points[gesture.h.i] = np;
-      else {
+      if (gesture.h.kind === 'pt') { sh.points[gesture.h.i] = np; applyJointAxis(sh); }
+      else if (gesture.h.kind === 'j1' || gesture.h.kind === 'j2') {
+        sh.guide = Object.assign({}, sh.guide, { [gesture.h.kind]: np });
+        sh.jointAxis = true;
+        applyJointAxis(sh);
+      } else {
+        if (sh.guide && sh.guide.j1 && sh.guide.j2) sh.jointAxis = false;
         if (!sh.base || !sh.tip) { const f = U.nailFrame(sh); sh.base = sh.base || f.base; sh.tip = sh.tip || f.tip; }
         sh[gesture.h.kind] = np;
         sh.guessed = false;
@@ -678,14 +718,32 @@
     if (f && f.W * viewXf().scale < 140) zoomToNail();
   }
 
+  // 関節の印が2つあれば、根元・先端を指の向きに合わせて置き直す（手で動かした後は連動しない）
+  function applyJointAxis(sh) {
+    const g = sh.guide;
+    if (!g || !g.j1 || !g.j2 || sh.points.length < 3 || sh.jointAxis === false) return false;
+    const r = U.axisFromJoints(sh.points, sh.smooth, g.j1, g.j2);
+    if (!r) return false;
+    sh.base = r.base; sh.tip = r.tip; sh.guessed = false;
+    return true;
+  }
+
   function addAt(p) {
     const t = target();
     if (!t) return;
     const s = srcSize();
     if (p.x < 0 || p.y < 0 || p.x > s.w || p.y > s.h) { toast('写真の外には置けません'); return; }
     const sh = t.shape;
-    if (ui.place === 'base' || ui.place === 'tip') {
+    if (ui.place === 'j1' || ui.place === 'j2') {
+      sh.guide = Object.assign({}, sh.guide || {}, { [ui.place]: p });
+      sh.jointAxis = true;
+      const done = applyJointAxis(sh);
+      toast((ui.place === 'j1' ? '第1関節' : '第2関節') + 'を置きました' +
+        (done ? '。根元・先端を指の向きに合わせました' : sh.guide.j1 && sh.guide.j2 ? '' : '。もう一方の関節も置いてください'));
+      ui.place = sh.guide.j1 && sh.guide.j2 ? 'point' : (ui.place === 'j1' ? 'j2' : 'j1');
+    } else if (ui.place === 'base' || ui.place === 'tip') {
       sh[ui.place] = p;
+      if (sh.guide && sh.guide.j1 && sh.guide.j2) sh.jointAxis = false;
       if (!sh.base || !sh.tip) { const g = sh.points.length >= 3 ? U.guessAxis(sh.points) : null; if (g) { sh.base = sh.base || g.base; sh.tip = sh.tip || g.tip; } }
       sh.guessed = false;
       toast((ui.place === 'base' ? '根元' : '先端') + 'を置きました');
@@ -695,7 +753,7 @@
       const i = U.insertIndex(sh.points, p);
       sh.points.splice(i, 0, p);
       ui.selPt = i;
-      if (sh.points.length >= 3 && (!sh.base || !sh.tip)) {
+      if (applyJointAxis(sh)) { /* 関節の線に合わせた */ } else if (sh.points.length >= 3 && (!sh.base || !sh.tip)) {
         const g = U.guessAxis(sh.points);
         sh.base = g.base; sh.tip = g.tip; sh.guessed = true;
       }
@@ -849,7 +907,7 @@
     const kids = [];
     kids.push(h('div', { class: 'row' }, [h('span', { class: 'note' }, ['点の数：', cnt, '（目安 6〜12点）'])]));
     kids.push(h('div', { class: 'chips', role: 'group', 'aria-label': 'タップで置くもの' }, [
-      ['point', '輪郭の点'], ['base', '根元を置く'], ['tip', '先端を置く'],
+      ['point', '輪郭の点'], ['base', '根元を置く'], ['tip', '先端を置く'], ['j1', '第1関節'], ['j2', '第2関節'],
     ].map(([k, l]) => h('button', {
       type: 'button', class: 'chip', 'aria-pressed': ui.place === k ? 'true' : 'false',
       onclick: () => { ui.place = k; ui.tool = 'edit'; renderPanel(); requestDraw(); },
@@ -883,6 +941,16 @@
         commit(); markDirty(); renderPanel();
       }, 'danger', { disabled: !n && !shape.base }),
     ]));
+    const g = shape.guide;
+    if (g && (g.j1 || g.j2)) {
+      const row = [];
+      if (g.j1 && g.j2 && shape.jointAxis === false) {
+        row.push(btn('関節の線に合わせ直す', () => { shape.jointAxis = true; applyJointAxis(shape); commit(); markDirty(); renderPanel(); }));
+      }
+      row.push(btn('関節の印を消す', () => { shape.guide = null; shape.jointAxis = true; commit(); markDirty(); renderPanel(); }));
+      kids.push(h('div', { class: 'row' }, row));
+    }
+    kids.push(note('「第1関節」「第2関節」に印を置くと、2つを結ぶ線（指の中心線）が表示され、根元・先端がその線と平行に自動で置かれます。柄が指の向きにまっすぐ合います。親指は、爪に近い関節と付け根側の関節に置いてください。'));
     kids.push(note('点をタップすると選択、ドラッグで移動します。指で隠れる部分は左上の拡大鏡で確認できます。2本指の操作は写真の拡大・移動だけで、輪郭は動きません。'));
     return kids;
   }
@@ -1176,7 +1244,10 @@
     ctx.drawImage(src, 0, 0);
     const assetId = await S.addCanvas(c, 'image/jpeg');
     const map = (p) => (p ? (dir > 0 ? { x: hh - p.y, y: p.x } : { x: p.y, y: w - p.x }) : p);
-    const mapShape = (sh) => { sh.points = sh.points.map(map); sh.base = map(sh.base); sh.tip = map(sh.tip); };
+    const mapShape = (sh) => {
+      sh.points = sh.points.map(map); sh.base = map(sh.base); sh.tip = map(sh.tip);
+      if (sh.guide) sh.guide = { j1: map(sh.guide.j1), j2: map(sh.guide.j2) };
+    };
     meta.assetId = assetId; meta.w = hh; meta.h = w;
     if (isRef) { mapShape(state.refDraft.shape); buildRefCanvas(); fitView('ref'); }
     else { FINGERS.forEach((F) => mapShape(state.nails[F.id].shape)); buildPhotoCanvas(); fitView('photo'); }

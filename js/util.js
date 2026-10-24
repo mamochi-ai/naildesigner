@@ -90,6 +90,42 @@
     return { base: a, tip: b };
   }
 
+  /* 第1・第2関節を結ぶ線（指の中心線）から、根元・先端を決める。
+     根元・先端は、その線と平行で、爪の輪郭の両端に置く */
+  function axisFromJoints(points, smooth, j1, j2) {
+    const cont = smoothContour(points, smooth == null ? 0.6 : smooth, 10);
+    let dx = j1.x - j2.x, dy = j1.y - j2.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 1 || cont.length < 3) return null;
+    dx /= L; dy /= L; // 根元→先端の向き（第2関節→第1関節の延長）
+    const nx = -dy, ny = dx;
+    const hits = (ox, oy) => {
+      const ts = [];
+      for (let i = 0; i < cont.length; i++) {
+        const a = cont[i], b = cont[(i + 1) % cont.length];
+        const da = (a.x - ox) * nx + (a.y - oy) * ny, db = (b.x - ox) * nx + (b.y - oy) * ny;
+        if ((da <= 0 && db > 0) || (da > 0 && db <= 0)) {
+          const k = da / (da - db);
+          const px = a.x + (b.x - a.x) * k, py = a.y + (b.y - a.y) * k;
+          ts.push((px - ox) * dx + (py - oy) * dy);
+        }
+      }
+      return ts;
+    };
+    let ox = j1.x, oy = j1.y;
+    let ts = hits(ox, oy);
+    if (ts.length < 2) {
+      // 関節の線が爪から外れているときは、同じ向きで爪の中心を通る線を使う
+      ox = 0; oy = 0;
+      cont.forEach((p) => { ox += p.x; oy += p.y; });
+      ox /= cont.length; oy /= cont.length;
+      ts = hits(ox, oy);
+      if (ts.length < 2) return null;
+    }
+    const t0 = Math.min(...ts), t1 = Math.max(...ts);
+    return { base: { x: ox + dx * t0, y: oy + dy * t0 }, tip: { x: ox + dx * t1, y: oy + dy * t1 } };
+  }
+
   /* 爪の座標系。u=幅方向（右）、v=根元→先端方向 */
   /* つけ爪（長さだし）の先端形状。p は角の丸さ、cap は先端カーブの長さ（爪幅の半分に対する倍率） */
   const EXT_SHAPES = {
@@ -253,7 +289,7 @@
   }
 
   ND.util = {
-    FINGERS, EXT_SHAPES, uid, clamp, clone, dist, rng, smoothContour, insertIndex, guessAxis, nailFrame,
+    FINGERS, EXT_SHAPES, axisFromJoints, uid, clamp, clone, dist, rng, smoothContour, insertIndex, guessAxis, nailFrame,
     localToImage, imageToUpright, pointInPoly, pathFrom, makeCanvas, hexToRgb, rgbToHex, shade,
     canvasToBlob, blobToDataURL, dataURLToBlob,
   };
