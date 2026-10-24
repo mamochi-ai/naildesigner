@@ -1079,7 +1079,7 @@
       }
       panel.appendChild(extGroup(n));
       panel.appendChild(group('位置・大きさの調整', tfControls(n.design, true, n.shape)));
-      panel.appendChild(finishGroup(n.design, '立体感・光沢（のっぺり見えるとき）', true));
+      panel.appendChild(finishGroup(n.design, '厚み・立体感・光沢（のっぺり見えるとき）', true));
       panel.appendChild(copyTargets((id) => {
         const d = ensureDesign(id);
         d.art = U.clone(n.design.art); d.tf = U.clone(n.design.tf);
@@ -1112,7 +1112,7 @@
       const d = n.design ? U.clone(n.design) : M.defaultDesign();
       d.art = { kind: 'cutout', cutoutId: cut.id };
       d.tf = Object.assign(M.defaultDesign().tf, { fit: 'shape' });
-      if (!n.design || !(n.design.art && n.design.art.kind === 'cutout')) { d.color = null; d.opacity = 1; d.shadeAmt = 0.4; d.gloss = 0; d.curve = 0.45; d.french.on = false; d.glitter.on = false; }
+      if (!n.design || !(n.design.art && n.design.art.kind === 'cutout')) { d.color = null; d.opacity = 1; d.shadeAmt = 0.4; d.gloss = 0; d.curve = 0.45; d.thick = 0.5; d.french.on = false; d.glitter.on = false; }
       d.presetId = null;
       return d;
     };
@@ -1347,10 +1347,11 @@
       slider('不透明度', d.opacity, 0.1, 1, 0.01, pct, (v) => (d.opacity = v)),
       note('下げると透明感が出ます。元の爪の色・模様も透けて見えます。'),
       slider('明暗の反映', d.shadeAmt, 0, 1, 0.01, pct, (v) => (d.shadeAmt = v)),
+      slider('厚み', d.thick == null ? 0.35 : d.thick, 0, 1, 0.01, pct, (v) => (d.thick = v)),
       slider('立体感', d.curve == null ? 0.5 : d.curve, 0, 1, 0.01, pct, (v) => (d.curve = v)),
       slider('光沢', d.gloss, 0, 1, 0.01, pct, (v) => (d.gloss = v)),
       slider('縁のなじませ', d.feather, 0, 3, 0.1, (v) => v.toFixed(1) + 'px', (v) => (d.feather = v)),
-      note('縁のなじませは輪郭の内側だけで行い、肌には色が付きません。'),
+      note('縁のなじませは輪郭の内側だけで行い、肌には色が付きません。厚みは爪の下にうすい影を付けて盛り上がりを表します（0で影なし）。'),
     ]));
 
     const fr = d.french;
@@ -1381,13 +1382,14 @@
 
   function finishGroup(d, title, isPhoto) {
     return group(title, [
+      slider('厚み', d.thick == null ? 0.35 : d.thick, 0, 1, 0.01, pct, (v) => (d.thick = v)),
       slider('立体感', d.curve == null ? 0.5 : d.curve, 0, 1, 0.01, pct, (v) => (d.curve = v)),
       slider('元の爪の明暗', d.shadeAmt, 0, 1, 0.01, pct, (v) => (d.shadeAmt = v)),
       slider('光沢を足す', d.gloss, 0, 1, 0.01, pct, (v) => (d.gloss = v)),
       slider('不透明度', d.opacity, 0.1, 1, 0.01, pct, (v) => (d.opacity = v)),
       note(isPhoto
-        ? '立体感は爪の丸みに合わせて両側を少し暗くします。参考写真の光沢がすでにある場合、光沢を足すと二重に見えることがあります。'
-        : '立体感は爪の丸みに合わせて両側を少し暗くします。'),
+        ? '厚みは、ふちの明暗と爪の下のうすい影で、ジェルの盛り上がりを表した見本です（実際の厚みとは異なります）。0にすると肌には影が付きません。参考写真の光沢がすでにある場合、光沢を足すと二重に見えることがあります。'
+        : '厚みは、ふちの明暗と爪の下のうすい影で盛り上がりを表した見本です。0にすると肌には影が付きません。'),
     ]);
   }
 

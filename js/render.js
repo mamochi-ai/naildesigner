@@ -53,7 +53,7 @@
 
   // 元写真の明るさ（平均を1に正規化）。単色を写真になじませるために使う
   function lumMap(env, key, x0, y0, bw, bh, mask) {
-    const k = env.photoId + '|' + key;
+    const k = env.photoId + '|' + key + '|' + x0 + ',' + y0 + ',' + bw + ',' + bh;
     const hit = lumCache.get(k);
     if (hit) return hit;
     const d = env.photo.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, bw, bh).data;
@@ -268,14 +268,42 @@
   }
 
   /* 1本分のネイル層を作る。戻り値 { canvas, x, y, frame } （画像座標） */
+  // 箱型ぼかし（横・縦に2回ずつ）。厚みの表現に使う
+  function boxBlur(src, w, h, r) {
+    const a = Float32Array.from(src), b = new Float32Array(w * h), n = 2 * r + 1;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let y = 0; y < h; y++) { // 横：a → b
+        const o = y * w;
+        let s = 0;
+        for (let x = -r; x <= r; x++) s += a[o + Math.min(w - 1, Math.max(0, x))];
+        for (let x = 0; x < w; x++) {
+          b[o + x] = s / n;
+          s += a[o + Math.min(w - 1, x + r + 1)] - a[o + Math.max(0, x - r)];
+        }
+      }
+      for (let x = 0; x < w; x++) { // 縦：b → a
+        let s = 0;
+        for (let y = -r; y <= r; y++) s += b[Math.min(h - 1, Math.max(0, y)) * w + x];
+        for (let y = 0; y < h; y++) {
+          a[y * w + x] = s / n;
+          s += b[Math.min(h - 1, y + r + 1) * w + x] - b[Math.max(0, y - r) * w + x];
+        }
+      }
+    }
+    return a;
+  }
+
   function nailLayer(shape, design, env, seed) {
     const f = U.nailFrame(shape);
     if (!f || !design) return null;
     const pw = env.photo.width, ph = env.photo.height;
-    const x0 = U.clamp(Math.floor(f.bounds.x0) - 2, 0, pw);
-    const y0 = U.clamp(Math.floor(f.bounds.y0) - 2, 0, ph);
-    const x1 = U.clamp(Math.ceil(f.bounds.x1) + 2, 0, pw);
-    const y1 = U.clamp(Math.ceil(f.bounds.y1) + 2, 0, ph);
+    const thick = design.thick == null ? 0.35 : design.thick;
+    // 厚みの影を爪の外側に落とすぶん、少し広く確保する
+    const mg = 2 + (thick > 0.01 ? Math.ceil(f.W * 0.2) : 0);
+    const x0 = U.clamp(Math.floor(f.bounds.x0) - mg, 0, pw);
+    const y0 = U.clamp(Math.floor(f.bounds.y0) - mg, 0, ph);
+    const x1 = U.clamp(Math.ceil(f.bounds.x1) + mg, 0, pw);
+    const y1 = U.clamp(Math.ceil(f.bounds.y1) + mg, 0, ph);
     const bw = x1 - x0, bh = y1 - y0;
     if (bw < 3 || bh < 3) return null;
     const skey = JSON.stringify(shape);
@@ -300,6 +328,14 @@
     // 立体感：爪は横方向に丸いので、両側と根元側をわずかに暗く、中央をわずかに明るくする
     const cvAmt = design.curve == null ? 0.5 : design.curve;
     const hwI = 2 / f.W, hhI = 2 / f.H, Cx = f.C.x - x0 - 0.5, Cy = f.C.y - y0 - 0.5;
+    // 厚み：輪郭をぼかした高さの地図から、上から光が当たったときの縁の明暗を作る
+    let B = null, R = 0;
+    if (thick > 0.01) {
+      R = Math.max(2, Math.round(f.W * (0.03 + 0.05 * thick)));
+      const m0 = new Float32Array(bw * bh);
+      for (let i = 0; i < m0.length; i++) m0[i] = mask[i] / 255;
+      B = boxBlur(m0, bw, bh, R);
+    }
     for (let i = 0, n = bw * bh; i < n; i++) {
       const m = mask[i];
       const j = i * 4;
@@ -315,13 +351,49 @@
         const back = lv < 0 ? Math.min(1, -lv) : 0;
         fac *= 1 + cvAmt * (0.07 * (1 - lu * lu) - 0.45 * Math.pow(lu, 2.4) - 0.14 * back * back * back);
       }
+      let hl = 0;
+      if (B) {
+        const x = i % bw, y = (i / bw) | 0;
+        const gx = B[i + (x < bw - 1 ? 1 : 0)] - B[i - (x > 0 ? 1 : 0)];
+        const gy = B[i + (y < bh - 1 ? bw : 0)] - B[i - (y > 0 ? bw : 0)];
+        hl = (0.45 * gx + 0.89 * gy) * R * 1.6; // 光は画面の上から
+        hl = hl > 1 ? 1 : hl < -1 ? -1 : hl;
+        fac *= 1 - thick * 0.22 * (1 - B[i]); // ふちほど少し暗く
+      }
       for (let ch = 0; ch < 3; ch++) {
-        const v = px[j + ch];
-        px[j + ch] = fac < 1 ? v * fac : v + (255 - v) * (fac - 1) * 0.85;
+        let v = px[j + ch];
+        v = fac < 1 ? v * fac : v + (255 - v) * (fac - 1) * 0.85;
+        if (hl > 0) v += (255 - v) * hl * 0.6 * thick;
+        else if (hl < 0) v *= 1 + hl * 0.45 * thick;
+        px[j + ch] = v;
       }
       px[j + 3] = (px[j + 3] * op * m) / 255;
     }
     p.putImageData(id, 0, 0);
+
+    // 爪の下に落ちる影（厚みがあるように見せる）。爪の内側には描かない
+    if (thick > 0.01) {
+      const sc = U.makeCanvas(bw, bh);
+      const g = sc.getContext('2d');
+      const OFF = 10000;
+      g.translate(-x0 - OFF, -y0);
+      g.shadowColor = 'rgba(45,28,22,' + (0.5 * thick).toFixed(3) + ')';
+      g.shadowBlur = Math.max(2, f.W * 0.07 * (0.5 + thick));
+      g.shadowOffsetX = OFF;
+      g.shadowOffsetY = Math.max(1, f.W * 0.05 * thick);
+      g.fillStyle = '#000';
+      U.pathFrom(g, f.contour);
+      g.fill();
+      g.setTransform(1, 0, 0, 1, -x0, -y0);
+      g.shadowColor = 'transparent';
+      g.globalCompositeOperation = 'destination-out';
+      U.pathFrom(g, f.contour);
+      g.fill();
+      p.save();
+      p.globalCompositeOperation = 'destination-over';
+      p.drawImage(sc, 0, 0);
+      p.restore();
+    }
 
     const decos = design.decos || [];
     if (design.gloss > 0.01 || decos.length) {
