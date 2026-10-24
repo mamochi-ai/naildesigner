@@ -1,4 +1,4 @@
-/* デモ素材（すべてプログラムで描いた図解。実写ではない） */
+/* デモ素材。手のサンプル写真（assets/sample-hand.jpg）と、プログラムで描いた図解 */
 (function () {
   'use strict';
   const ND = (window.ND = window.ND || {});
@@ -199,47 +199,32 @@
     return sample;
   }
 
-  /* 撮影ガイド用の図解（良い例・悪い例） */
-  const guideCache = {};
-  function guideImage(kind) {
-    if (guideCache[kind]) return guideCache[kind];
-    const W = 240, H = 280;
-    const c = U.makeCanvas(W, H);
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#ebe5dd';
-    ctx.fillRect(0, 0, W, H);
-    const src = hand({ label: false, closed: kind === 'closed', background: false });
-    const sx = 60, sy = 220, sw = 1080, sh = 1260; // 手の部分だけを切り出す
-    if (kind === 'angle') {
-      // 斜めから撮ると爪が縮んで見える
-      ctx.setTransform(1, 0, -0.35, 0.5, 60, 80);
-      ctx.drawImage(src.canvas, sx, sy, sw, sh, 0, 0, W, H);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-    } else if (kind === 'far') {
-      ctx.drawImage(src.canvas, sx, sy, sw, sh, W * 0.37, H * 0.4, W * 0.26, H * 0.26);
-    } else {
-      ctx.drawImage(src.canvas, sx, sy, sw, sh, 0, 0, W, H);
-    }
-    if (kind === 'dark') {
-      ctx.fillStyle = 'rgba(25,18,14,0.66)';
-      ctx.fillRect(0, 0, W, H);
-    }
-    if (kind === 'glare') {
-      const k = W / sw;
-      Object.keys(src.shapes).forEach((id) => {
-        const t = src.shapes[id].tip, b = src.shapes[id].base;
-        const x = ((t.x + b.x) / 2 - sx) * k, y = ((t.y + b.y) / 2 - sy) * k;
-        const g = ctx.createRadialGradient(x, y, 0, x, y, 16);
-        g.addColorStop(0, 'rgba(255,255,255,1)');
-        g.addColorStop(0.6, 'rgba(255,255,255,0.9)');
-        g.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.fill();
-      });
-    }
-    guideCache[kind] = c.toDataURL('image/png');
-    return guideCache[kind];
+  /* 手のサンプル写真。人差し指〜薬指には、写真に合わせて置いた例の輪郭を入れる（自動検出ではない） */
+  const SAMPLE_HAND_URL = 'assets/sample-hand.jpg';
+  const SAMPLE_SHAPES = {
+    index: [[355, 156], [378, 163], [392, 180], [394, 215], [390, 245], [370, 258], [345, 258], [328, 245], [324, 210], [330, 172]],
+    middle: [[548, 57], [570, 62], [582, 78], [584, 110], [580, 150], [562, 166], [537, 167], [515, 155], [510, 115], [514, 75]],
+    ring: [[716, 147], [738, 152], [752, 170], [754, 205], [750, 240], [732, 256], [705, 255], [688, 243], [682, 205], [690, 160]],
+  };
+  const SAMPLE_AXIS = { index: [[358, 258], [356, 157]], middle: [[548, 168], [548, 57]], ring: [[718, 256], [716, 147]] };
+  function handPhoto() {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const W = img.naturalWidth, H = img.naturalHeight, k = 1086 / W; // 座標は幅1086pxの元画像基準
+        const c = U.makeCanvas(W, H);
+        c.getContext('2d').drawImage(img, 0, 0);
+        const sc = ([x, y]) => ({ x: x / k, y: y / k });
+        const shapes = {};
+        Object.keys(SAMPLE_SHAPES).forEach((id) => {
+          shapes[id] = { points: SAMPLE_SHAPES[id].map(sc), base: sc(SAMPLE_AXIS[id][0]), tip: sc(SAMPLE_AXIS[id][1]), smooth: 0.6 };
+        });
+        resolve({ canvas: c, shapes, preset: Object.keys(SAMPLE_SHAPES) });
+      };
+      img.onerror = () => reject(new Error('sample'));
+      img.src = SAMPLE_HAND_URL;
+    });
   }
 
-  ND.demo = { hand, reference, sampleFinger, guideImage };
+  ND.demo = { hand, handPhoto, reference, sampleFinger };
 })();

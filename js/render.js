@@ -569,7 +569,7 @@
     ctx.fillStyle = '#7d6d70';
     ctx.font = '22px ' + FONT;
     ctx.fillText('※ 色・柄・配置を相談するためのプレビューです。実際の施術の仕上がりを保証するものではありません。', M0, y);
-    if (state.photo && state.photo.demo) ctx.fillText('※ 図解デモ画像を使用しています（実写ではありません）。', M0, y + 34);
+    if (state.photo && state.photo.demo) ctx.fillText(state.photo.demo === 'photo' ? '※ デモ用のサンプル写真を使用しています。' : '※ 図解デモ画像を使用しています（実写ではありません）。', M0, y + 34);
     return c;
   }
 

@@ -4,6 +4,7 @@
 使い方: python3 tools/build_artifact.py  → dist/naildesigner.html
 （静的ホスティングでは index.html をそのまま使えるので、このビルドは不要）
 """
+import base64
 import pathlib
 import re
 
@@ -28,6 +29,13 @@ def main():
                      lambda m: "<script>\n" + (ROOT / m.group(1)).read_text(encoding="utf-8").replace("</script", "<\\/script") + "\n</script>",
                      scripts)
     out = head.strip() + "\n" + body.strip() + "\n" + scripts.strip() + "\n"
+    # assets/ の画像はプレビューでは別ファイルを読めないので、データURIとして埋め込む
+    mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    def inline(m):
+        f = ROOT / "assets" / m.group(2)
+        data = base64.b64encode(f.read_bytes()).decode("ascii")
+        return m.group(1) + "data:" + mime[f.suffix.lower()] + ";base64," + data + m.group(1)
+    out = re.sub(r'(["\'])assets/([\w.-]+)\1', inline, out)
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     (dist / "naildesigner.html").write_text(out, encoding="utf-8")

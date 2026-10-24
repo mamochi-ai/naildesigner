@@ -398,7 +398,7 @@
     let b = '';
     if (refMode()) b = '参考画像を編集中';
     else if (ui.compare) b = '変更前（元の写真）';
-    else if (state.photo && state.photo.demo) b = '図解デモ（実写ではありません）';
+    else if (state.photo && state.photo.demo) b = state.photo.demo === 'photo' ? 'サンプル写真' : '図解デモ（実写ではありません）';
     badge.hidden = !b;
     badge.textContent = b;
   }
@@ -1627,10 +1627,12 @@
   }
 
   async function loadDemo() {
-    const d = ND.demo.hand();
+    // サンプル写真を使う。読み込めない環境では図解の手で代用する
+    let d, kind = 'photo';
+    try { d = await ND.demo.handPhoto(); } catch (e) { d = ND.demo.hand(); kind = 'illust'; }
     const id = await S.addCanvas(d.canvas, 'image/jpeg');
     state = emptyState();
-    state.photo = { assetId: id, w: d.canvas.width, h: d.canvas.height, demo: true };
+    state.photo = { assetId: id, w: d.canvas.width, h: d.canvas.height, demo: kind };
     d.preset.forEach((fid) => { state.nails[fid].shape = U.clone(d.shapes[fid]); });
     state.nails.index.design = M.defaultDesign();
     state.nails.middle.design = M.applyPreset(null, M.PRESETS.find((p) => p.id === 'flowers'));
@@ -1640,7 +1642,7 @@
     commit();
     hideStart();
     renderAll();
-    toast('図解デモです。人差し指〜薬指には例の輪郭が入っています');
+    toast((kind === 'photo' ? 'サンプル写真です。' : '図解デモです。') + '人差し指〜薬指には例の輪郭が入っています');
   }
 
   async function importProjectFile(file) {
@@ -1783,9 +1785,6 @@
   function hideStart() { $('startScreen').hidden = true; }
 
   function openGuide() {
-    document.querySelectorAll('#guideScreen img[data-guide]').forEach((im) => {
-      if (!im.getAttribute('src')) im.src = ND.demo.guideImage(im.dataset.guide);
-    });
     $('guideScreen').hidden = false;
     $('guideScreen').scrollTop = 0;
     try { localStorage.setItem('nd_guide_seen', '1'); } catch (_) { /* noop */ }

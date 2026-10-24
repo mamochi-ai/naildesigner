@@ -239,15 +239,8 @@ textarea { width: 100%; box-sizing: border-box; min-height: 96px; border: 1px so
 .guide-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .guide-head h2 { margin: 0; font-size: 22px; }
 .guide-lead { margin: 0; font-size: 15.5px; }
-.guide-examples { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.guide-examples figcaption { grid-column: 1 / -1; }
-.ex { position: relative; background: var(--surface); border: 2px solid var(--line); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
-.ex img { width: 100%; height: auto; aspect-ratio: 240 / 280; border-radius: 8px; display: block; background: var(--stage); }
-.ex .tag { position: absolute; top: 12px; left: 12px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff; letter-spacing: 0.06em; }
-.ex.ok { border-color: var(--ok); }
-.ex.ok .tag { background: var(--ok); }
-.ex.ng .tag { background: #9b2c3d; }
-.ex .cap { font-size: 12.5px; line-height: 1.4; }
+.guide-photo { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.guide-photo img { width: 100%; max-width: 560px; height: auto; align-self: center; border-radius: 12px; border: 1px solid var(--line); background: var(--stage); }
 .guide-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 10px; }
 .guide-steps li {
   counter-increment: step; display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: 10px;
@@ -264,9 +257,6 @@ textarea { width: 100%; box-sizing: border-box; min-height: 96px; border: 1px so
 .guide-tips ul { margin: 0; padding-left: 1.2em; font-size: 13.5px; }
 .guide-actions { display: flex; flex-direction: column; gap: 8px; }
 .photo-issues { margin: 0; padding-left: 1.2em; }
-@media (max-width: 520px) {
-  .guide-examples { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 
 .start-actions { display: flex; flex-direction: column; gap: 10px; }
 .fine { margin: 0; font-size: 12.5px; color: var(--muted); }
